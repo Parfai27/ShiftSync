@@ -21,14 +21,23 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
 
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByUsername(request.username())
-            .orElseThrow(() -> new IllegalArgumentException("Invalid username or password"));
+        User user = userRepository.findByEmail(request.email())
+            .orElseThrow(() -> new IllegalArgumentException("Invalid email or password"));
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            throw new IllegalArgumentException("Invalid username or password");
+            throw new IllegalArgumentException("Invalid email or password");
         }
 
-        return new AuthResponse(user.getId(), user.getFullName(), user.getUsername(), user.getRole(), "Login successful");
+        return new AuthResponse(
+            user.getId(),
+            user.getFullName(),
+            user.getUsername(),
+            user.getEmail(),
+            user.getRole(),
+            user.getBranch() != null ? user.getBranch().getId() : null,
+            user.getProfileImageUrl(),
+            "Login successful"
+        );
     }
 
     public AuthResponse register(RegisterRequest request) {
@@ -49,6 +58,15 @@ public class AuthService {
             .build();
 
         userRepository.save(user);
-        return new AuthResponse(user.getId(), user.getFullName(), user.getUsername(), user.getRole(), "Registration successful");
+        return new AuthResponse(
+            user.getId(),
+            user.getFullName(),
+            user.getUsername(),
+            user.getEmail(),
+            user.getRole(),
+            user.getBranch() != null ? user.getBranch().getId() : null,
+            user.getProfileImageUrl(),
+            "Registration successful"
+        );
     }
 }

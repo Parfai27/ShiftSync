@@ -44,6 +44,11 @@ public final class SchedulingDtos {
     public record AdjustmentStatusUpdate(@NotNull AdjustmentStatus status) {
     }
 
+    public record ManagerSchedulingActionRequest(
+        @NotNull Long managerId
+    ) {
+    }
+
     public record ShiftResponse(
         Long id,
         String name,

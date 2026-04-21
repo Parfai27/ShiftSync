@@ -74,7 +74,7 @@ $env:SHIFT_SYNC_SERVER_PORT="8080"
 
 ## Run
 
-This project uses Maven:
+This project uses Maven and should be run with `JDK 21` because Lombok in this project does not compile correctly on `JDK 24`.
 
 ```powershell
 cd backend
@@ -83,13 +83,19 @@ mvn spring-boot:run
 
 If Maven is not installed on your machine yet, install it first or generate a wrapper.
 
+You can also use the included helper script:
+
+```powershell
+backend\start-backend.cmd
+```
+
 ## Seeded Login Accounts
 
-These are inserted automatically on first run:
+These are inserted automatically on first run and login now uses email:
 
-- admin / `admin123`
-- manager / `manager123`
-- employee / `employee123`
+- `admin@shiftsync.local` / `admin123`
+- `manager@ngabopharmacy.rw` / `manager123`
+- `employee@ngabopharmacy.rw` / `employee123`
 
 ## Useful Endpoints
 
@@ -99,6 +105,7 @@ These are inserted automatically on first run:
 - `GET /api/dashboard/overview`
 - `GET /api/users`
 - `GET /api/users/employees`
+- `GET /api/manager/workspace/{userId}`
 - `GET /api/scheduling/shifts`
 - `POST /api/scheduling/shifts`
 - `GET /api/scheduling/adjustments`

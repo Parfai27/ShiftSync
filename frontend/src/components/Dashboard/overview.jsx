@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
 	FiBell,
 	FiCalendar,
@@ -18,8 +18,9 @@ import {
 	FiPieChart,
 } from 'react-icons/fi'
 import { RiGroupLine, RiRadarLine } from 'react-icons/ri'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
+import { resolveProfileImage } from '../../lib/managerWorkspace'
 import { clearSession, loadSession } from '../../lib/session'
 
 const metricPresentation = {
@@ -28,6 +29,8 @@ const metricPresentation = {
 	'Coverage %': { icon: RiRadarLine, accent: 'bg-orange-50 text-orange-600' },
 	'Pending Adjustments': { icon: FiClock, accent: 'bg-rose-50 text-rose-600' },
 }
+
+const weekLabels = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 const fallbackOverview = {
 	metrics: [
@@ -38,14 +41,13 @@ const fallbackOverview = {
 	],
 	shiftStatuses: [],
 	recentAdjustments: [],
+	attendanceBars: [20, 20, 20, 20, 20, 20, 20],
+	weekLabels: weekLabels,
+	heatmap: Array.from({ length: 14 }, () => 'low'),
+	alertTitle: 'Loading alert...',
+	alertDescription: '',
+	unreadNotifications: 0,
 }
-
-const heatmap = [
-	['low', 'low', 'medium', 'high', 'high', 'high', 'low'],
-	['low', 'medium', 'medium', 'low', 'low', 'high', 'medium'],
-]
-
-const weekLabels = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 function StatusPill({ children, tone }) {
 	return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-extrabold tracking-[0.14em] ${tone}`}>{children}</span>
@@ -98,18 +100,30 @@ function resolveAdjustmentTone(status) {
 }
 
 export default function Overview() {
+	const navigate = useNavigate()
 	const session = loadSession()
 	const [overview, setOverview] = useState(fallbackOverview)
 	const [isLoading, setIsLoading] = useState(true)
 	const [error, setError] = useState('')
+	const [actionError, setActionError] = useState('')
+	const [searchTerm, setSearchTerm] = useState('')
+	const [rangeDays, setRangeDays] = useState(7)
+	const [adjustmentFilter, setAdjustmentFilter] = useState('ALL')
+	const [isCreatingShift, setIsCreatingShift] = useState(false)
 
 	useEffect(() => {
 		let cancelled = false
 
 		async function loadOverview() {
+			if (!session?.userId) {
+				setError('No active manager session was found.')
+				setIsLoading(false)
+				return
+			}
+
 			try {
 				setError('')
-				const data = await apiRequest('/api/dashboard/overview')
+				const data = await apiRequest(`/api/dashboard/overview/${session.userId}?rangeDays=${rangeDays}`)
 				if (!cancelled) {
 					setOverview(data)
 				}
@@ -129,10 +143,66 @@ export default function Overview() {
 		return () => {
 			cancelled = true
 		}
-	}, [])
+	}, [rangeDays, session?.userId])
 
 	const displayName = session?.fullName || 'Shift Manager'
 	const displayRole = session?.role ? session.role.replace('_', ' ') : 'MANAGER'
+	const profileImage = resolveProfileImage(session?.profileImageUrl, displayName)
+	const normalizedSearch = searchTerm.trim().toLowerCase()
+
+	const visibleShiftStatuses = useMemo(() => {
+		return overview.shiftStatuses.filter((shift) => {
+			if (!normalizedSearch) {
+				return true
+			}
+			return [shift.name, shift.time, shift.status, shift.fill, shift.dayLabel].join(' ').toLowerCase().includes(normalizedSearch)
+		})
+	}, [normalizedSearch, overview.shiftStatuses])
+
+	const visibleAdjustments = useMemo(() => {
+		return overview.recentAdjustments.filter((item) => {
+			const matchesSearch = !normalizedSearch || [item.employee, item.type, item.originalValue, item.revisedValue, item.status, item.requestedAt].join(' ').toLowerCase().includes(normalizedSearch)
+			const matchesFilter = adjustmentFilter === 'ALL' || item.status === adjustmentFilter
+			return matchesSearch && matchesFilter
+		})
+	}, [adjustmentFilter, normalizedSearch, overview.recentAdjustments])
+
+	function cycleAdjustmentFilter() {
+		setAdjustmentFilter((current) => {
+			if (current === 'ALL') {
+				return 'PENDING'
+			}
+			if (current === 'PENDING') {
+				return 'APPROVED'
+			}
+			if (current === 'APPROVED') {
+				return 'REJECTED'
+			}
+			return 'ALL'
+		})
+	}
+
+	async function handleCreateShift() {
+		if (!session?.userId) {
+			setActionError('No active manager session was found.')
+			return
+		}
+
+		try {
+			setActionError('')
+			setIsCreatingShift(true)
+			await apiRequest('/api/scheduling/manager/create-shift', {
+				method: 'POST',
+				body: JSON.stringify({ managerId: session.userId }),
+			})
+			const refreshed = await apiRequest(`/api/dashboard/overview/${session.userId}?rangeDays=${rangeDays}`)
+			setOverview(refreshed)
+		} catch (requestError) {
+			setActionError(requestError.message || 'Unable to create a new shift.')
+		} finally {
+			setIsCreatingShift(false)
+		}
+	}
 
 	return (
 		<main className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#eef4ff_0%,#f7f9ff_38%,#eef2ff_100%)] text-slate-900">
@@ -153,7 +223,13 @@ export default function Overview() {
 					</nav>
 
 					<div className="mt-auto space-y-3 pt-8">
-						<button className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:bg-[#0b44de]"><FiPlus className="h-4 w-4" /> Create New Shift</button>
+						<button
+							disabled={isCreatingShift}
+							onClick={handleCreateShift}
+							className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:bg-[#0b44de] disabled:cursor-not-allowed disabled:opacity-60"
+						>
+							<FiPlus className="h-4 w-4" /> {isCreatingShift ? 'Creating Shift...' : 'Create New Shift'}
+						</button>
 						<div className="space-y-1 text-sm text-slate-600">
 							<Link className="flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-white/70" to="/manager-settings"><FiSettings className="h-4 w-4" /> Settings</Link>
 							<Link
@@ -183,18 +259,33 @@ export default function Overview() {
 						<div className="mt-4 flex flex-col gap-4 xl:mt-0 xl:flex-row xl:items-center xl:justify-between">
 							<label className="relative w-full max-w-3xl">
 								<FiSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-								<input type="search" placeholder="Search resources, shifts, or members..." className="h-12 w-full rounded-full border border-slate-200/80 bg-[#f5f7ff] px-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#0f51ff] focus:bg-white" />
+								<input
+									type="search"
+									value={searchTerm}
+									onChange={(event) => setSearchTerm(event.target.value)}
+									placeholder="Search resources, shifts, or members..."
+									className="h-12 w-full rounded-full border border-slate-200/80 bg-[#f5f7ff] px-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#0f51ff] focus:bg-white"
+								/>
 							</label>
 
 							<div className="flex items-center justify-between gap-3 xl:justify-end">
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiBell className="h-4 w-4" /></button>
+								<button
+									onClick={() => navigate('/notifications')}
+									className="relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"
+									aria-label="Open notifications"
+								>
+									<FiBell className="h-4 w-4" />
+									{overview.unreadNotifications > 0 ? <span className="absolute right-2 top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">{overview.unreadNotifications}</span> : null}
+								</button>
 								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiMoon className="h-4 w-4" /></button>
 								<div className="flex items-center gap-3 rounded-full bg-white px-3 py-2">
 									<div className="text-right leading-tight">
 										<div className="text-sm font-bold text-slate-900">{displayName}</div>
 										<div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{displayRole}</div>
 									</div>
-									<div className="h-10 w-10 overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f51ff,#7ea4ff)] ring-2 ring-[#eef3ff]" />
+									<div className="h-10 w-10 overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f51ff,#7ea4ff)] ring-2 ring-[#eef3ff]">
+										<img alt={displayName} className="h-full w-full object-cover" src={profileImage} />
+									</div>
 									<FiChevronDown className="h-4 w-4 text-slate-400" />
 								</div>
 							</div>
@@ -209,15 +300,20 @@ export default function Overview() {
 									<p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">Real-time workforce metrics and performance visibility for the current operational cycle.</p>
 								</div>
 								<div className="inline-flex rounded-2xl bg-[#f3f6ff] p-1 text-sm font-semibold text-slate-500">
-									<button className="rounded-xl bg-white px-4 py-2 text-[#0f51ff]">Last 24 Hours</button>
-									<button className="rounded-xl px-4 py-2">7 Days</button>
-									<button className="rounded-xl px-4 py-2">30 Days</button>
+									<button onClick={() => setRangeDays(1)} className={`rounded-xl px-4 py-2 ${rangeDays === 1 ? 'bg-white text-[#0f51ff]' : ''}`}>Last 24 Hours</button>
+									<button onClick={() => setRangeDays(7)} className={`rounded-xl px-4 py-2 ${rangeDays === 7 ? 'bg-white text-[#0f51ff]' : ''}`}>7 Days</button>
+									<button onClick={() => setRangeDays(30)} className={`rounded-xl px-4 py-2 ${rangeDays === 30 ? 'bg-white text-[#0f51ff]' : ''}`}>30 Days</button>
 								</div>
 							</div>
 
 							{error ? (
 								<div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
 									{error}
+								</div>
+							) : null}
+							{actionError ? (
+								<div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+									{actionError}
 								</div>
 							) : null}
 
@@ -256,13 +352,13 @@ export default function Overview() {
 
 								<div className="mt-5 rounded-3xl bg-[linear-gradient(180deg,#f6f8ff_0%,#ffffff_100%)] p-4 sm:p-6">
 									<div className="grid h-82.5 grid-cols-7 items-end gap-3 sm:h-90">
-										{[38, 58, 74, 66, 82, 88, 72].map((height, index) => (
-											<div key={weekLabels[index]} className="flex h-full flex-col items-center justify-end gap-3">
+										{overview.attendanceBars.map((height, index) => (
+											<div key={overview.weekLabels[index]} className="flex h-full flex-col items-center justify-end gap-3">
 												<div className="relative flex h-full w-full items-end justify-center rounded-[18px] bg-white/40 px-2 pb-2">
 													<div className="w-full rounded-2xl bg-[linear-gradient(180deg,rgba(15,81,255,0.95)_0%,rgba(15,81,255,0.42)_100%)]" style={{ height: `${height}%` }} />
 													<div className="absolute bottom-2 left-1/2 h-[56%] w-[44%] -translate-x-1/2 rounded-[14px] bg-slate-300/70" />
 												</div>
-												<span className="text-[11px] font-extrabold tracking-[0.18em] text-slate-500">{weekLabels[index]}</span>
+												<span className="text-[11px] font-extrabold tracking-[0.18em] text-slate-500">{overview.weekLabels[index]}</span>
 											</div>
 										))}
 									</div>
@@ -270,19 +366,19 @@ export default function Overview() {
 							</article>
 
 							<article className="rounded-[26px] border border-slate-200/80 bg-[#eef3ff] p-5 sm:p-6">
-								<div className="flex items-center justify-between gap-3"><h2 className="text-xl font-extrabold tracking-[-0.04em] text-slate-950">Shift Status</h2><a className="text-sm font-bold text-[#0f51ff]" href="#shifts">View All</a></div>
+								<div className="flex items-center justify-between gap-3"><h2 className="text-xl font-extrabold tracking-[-0.04em] text-slate-950">Shift Status</h2><Link className="text-sm font-bold text-[#0f51ff]" to="/scheduling">View All</Link></div>
 								<div className="mt-5 space-y-3">
-									{overview.shiftStatuses.length ? overview.shiftStatuses.map((shift, index) => (
+									{visibleShiftStatuses.length ? visibleShiftStatuses.map((shift, index) => (
 										<div key={shift.name} className="rounded-[18px] border border-white/80 bg-white p-4">
 											<div className={`mb-3 h-0.5 w-full rounded-full ${resolveShiftBar(index)}`} />
 											<div className="flex items-start justify-between gap-3">
-												<div><div className="text-[15px] font-extrabold text-slate-900">{shift.name}</div><div className="mt-1 text-xs font-medium text-slate-500">{shift.time}</div></div>
+												<div><div className="text-[15px] font-extrabold text-slate-900">{shift.name}</div><div className="mt-1 text-xs font-medium text-slate-500">{shift.time} • {shift.dayLabel}</div></div>
 												<div className="text-right text-sm font-bold text-slate-700"><div>{shift.fill}</div><div className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-[10px] font-extrabold tracking-[0.12em] ${resolveShiftTone(shift.status)}`}>{shift.status}</div></div>
 											</div>
 										</div>
 									)) : (
 										<div className="rounded-[18px] border border-white/80 bg-white p-4 text-sm text-slate-500">
-											{isLoading ? 'Loading shift status...' : 'No shift status records available yet.'}
+											{isLoading ? 'Loading shift status...' : normalizedSearch ? 'No shifts matched your search.' : 'No shift status records available yet.'}
 										</div>
 									)}
 								</div>
@@ -290,8 +386,9 @@ export default function Overview() {
 								<div className="mt-5 overflow-hidden rounded-[22px] bg-[#10204a] text-white">
 									<div className="relative min-h-50 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.1),transparent_40%),linear-gradient(160deg,#17294f_0%,#0f1730_100%)] p-5">
 										<div className="text-[11px] font-bold uppercase tracking-[0.28em] text-cyan-200/80">Upcoming Alert</div>
-										<h3 className="mt-3 max-w-55 text-2xl font-black tracking-[-0.05em]">Compliance Review: Q3 Documentation due in 4 days.</h3>
+										<h3 className="mt-3 max-w-55 text-2xl font-black tracking-[-0.05em]">{overview.alertTitle}</h3>
 										<div className="absolute bottom-4 right-4 rounded-full bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white/80 backdrop-blur-sm">Priority</div>
+										<p className="mt-3 max-w-60 text-sm leading-6 text-blue-50/90">{overview.alertDescription}</p>
 									</div>
 								</div>
 							</article>
@@ -301,7 +398,7 @@ export default function Overview() {
 							<article className="overflow-hidden rounded-[26px] border border-slate-200/80 bg-white">
 								<div className="flex items-center justify-between gap-3 px-5 py-5 sm:px-6">
 									<h2 className="text-xl font-extrabold tracking-[-0.04em] text-slate-950">Recent Shift Adjustments</h2>
-									<button className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-600"><FiFilter className="h-3.5 w-3.5" /> Filter</button>
+									<button onClick={cycleAdjustmentFilter} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-600"><FiFilter className="h-3.5 w-3.5" /> {adjustmentFilter}</button>
 								</div>
 								<div className="overflow-x-auto">
 									<table className="min-w-full text-left">
@@ -309,18 +406,18 @@ export default function Overview() {
 											<tr><th className="px-5 py-4 sm:px-6">Employee</th><th className="px-5 py-4 sm:px-6">Adjustment Type</th><th className="px-5 py-4 sm:px-6">Original</th><th className="px-5 py-4 sm:px-6">Revised</th><th className="px-5 py-4 sm:px-6">Status</th></tr>
 										</thead>
 										<tbody>
-											{overview.recentAdjustments.length ? overview.recentAdjustments.map((item) => (
+											{visibleAdjustments.length ? visibleAdjustments.map((item) => (
 												<tr key={`${item.employee}-${item.type}-${item.revisedValue}`} className="border-t border-slate-100 text-sm text-slate-700">
 													<td className="px-5 py-4 sm:px-6"><div className="flex items-center gap-3 font-semibold text-slate-900"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,#0f51ff,#91b2ff)] text-[11px] font-black text-white">{item.employee.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>{item.employee}</div></td>
 													<td className="px-5 py-4 sm:px-6">{item.type}</td>
 													<td className="px-5 py-4 sm:px-6 text-slate-500">{item.originalValue}</td>
-													<td className="px-5 py-4 sm:px-6 font-semibold text-[#0f51ff]">{item.revisedValue}</td>
+													<td className="px-5 py-4 sm:px-6 font-semibold text-[#0f51ff]">{item.revisedValue}<div className="text-xs font-medium text-slate-500">{item.requestedAt}</div></td>
 													<td className="px-5 py-4 sm:px-6"><StatusPill tone={resolveAdjustmentTone(item.status)}>{item.status}</StatusPill></td>
 												</tr>
 											)) : (
 												<tr className="border-t border-slate-100 text-sm text-slate-500">
 													<td className="px-5 py-4 sm:px-6" colSpan="5">
-														{isLoading ? 'Loading adjustment records...' : 'No recent adjustment records available yet.'}
+														{isLoading ? 'Loading adjustment records...' : normalizedSearch || adjustmentFilter !== 'ALL' ? 'No adjustments matched the current filters.' : 'No recent adjustment records available yet.'}
 													</td>
 												</tr>
 											)}
@@ -333,7 +430,7 @@ export default function Overview() {
 								<article className="rounded-[26px] border border-slate-200/80 bg-white p-5 sm:p-6">
 									<div className="mb-4 text-[13px] font-extrabold uppercase tracking-[0.22em] text-slate-500">Coverage Heatmap</div>
 									<div className="grid grid-cols-7 gap-2">
-										{heatmap.flatMap((row, rowIndex) => row.map((level, colIndex) => <span key={`${rowIndex}-${colIndex}`} className={`aspect-square rounded-md ${level === 'high' ? 'bg-blue-600' : level === 'medium' ? 'bg-blue-300' : 'bg-slate-200'}`} />))}
+										{overview.heatmap.map((level, index) => <span key={index} className={`aspect-square rounded-md ${level === 'high' ? 'bg-blue-600' : level === 'medium' ? 'bg-blue-300' : 'bg-slate-200'}`} />)}
 									</div>
 									<p className="mt-4 text-sm leading-6 text-slate-500">Critical staffing gaps detected on Thursday afternoons. Consider reallocating flex-time staff.</p>
 								</article>
@@ -342,7 +439,7 @@ export default function Overview() {
 									<div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-white/80"><FiChevronDown className="h-3.5 w-3.5 rotate-90" /> Efficiency Tip</div>
 									<h3 className="mt-4 max-w-xs text-2xl font-black tracking-[-0.05em]">Optimize Night Coverage</h3>
 									<p className="mt-3 text-sm leading-6 text-blue-50/90">Analysis shows a 15% increase in productivity when Night shifts overlap by 30 minutes with Morning arrivals.</p>
-									<button className="mt-5 inline-flex rounded-2xl bg-white px-4 py-3 text-sm font-extrabold text-[#0f51ff] transition hover:-translate-y-0.5">Update Preferences</button>
+									<button onClick={() => navigate('/manager-settings')} className="mt-5 inline-flex rounded-2xl bg-white px-4 py-3 text-sm font-extrabold text-[#0f51ff] transition hover:-translate-y-0.5">Update Preferences</button>
 								</article>
 							</div>
 						</section>

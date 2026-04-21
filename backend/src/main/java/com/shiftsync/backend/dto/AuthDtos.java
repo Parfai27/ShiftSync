@@ -9,7 +9,7 @@ public final class AuthDtos {
     }
 
     public record LoginRequest(
-        @NotBlank String username,
+        @NotBlank String email,
         @NotBlank String password
     ) {
     }
@@ -28,7 +28,10 @@ public final class AuthDtos {
         Long userId,
         String fullName,
         String username,
+        String email,
         Role role,
+        Long branchId,
+        String profileImageUrl,
         String message
     ) {
     }

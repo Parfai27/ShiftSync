@@ -31,6 +31,8 @@ public class User extends BaseEntity {
     @Column(nullable = false, unique = true)
     private String email;
 
+    private String profileImageUrl;
+
     @Column(nullable = false)
     @JsonIgnore
     private String passwordHash;

@@ -17,7 +17,7 @@ function resolveDestination(role) {
 
 export default function Login() {
 	const navigate = useNavigate()
-	const [form, setForm] = useState({ username: '', password: '', remember: false })
+	const [form, setForm] = useState({ email: '', password: '', remember: false })
 	const [error, setError] = useState('')
 	const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -50,7 +50,7 @@ export default function Login() {
 	function handleSubmit(event) {
 		event.preventDefault()
 		handleLogin({
-			username: form.username.trim(),
+			email: form.email.trim(),
 			password: form.password,
 		})
 	}
@@ -80,14 +80,14 @@ export default function Login() {
 						<form className="mt-10 space-y-5" style={{ maxWidth: '360px' }} onSubmit={handleSubmit}>
 							<label className="block">
 								<span className="mb-2 block text-[12px] font-semibold text-slate-700">
-									Username
+									Email Address
 								</span>
 								<input
-									type="text"
-									value={form.username}
-									onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-									placeholder="manager"
-									autoComplete="username"
+									type="email"
+									value={form.email}
+									onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+									placeholder="name@organization.com"
+									autoComplete="email"
 									className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
 								/>
 							</label>
