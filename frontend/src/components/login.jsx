@@ -1,5 +1,5 @@
 import { startTransition, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
 import { saveSession } from '../lib/session'
 
@@ -17,8 +17,9 @@ function resolveDestination(role) {
 
 export default function Login() {
 	const navigate = useNavigate()
+	const location = useLocation()
 	const [form, setForm] = useState({ email: '', password: '', remember: false })
-	const [error, setError] = useState('')
+	const [error, setError] = useState(location.state?.message || '')
 	const [isSubmitting, setIsSubmitting] = useState(false)
 
 	async function handleLogin(credentials) {
@@ -35,6 +36,7 @@ export default function Login() {
 				...payload,
 				remember: form.remember,
 				loggedInAt: new Date().toISOString(),
+				lastActivityAt: new Date().toISOString(),
 			})
 
 			startTransition(() => {

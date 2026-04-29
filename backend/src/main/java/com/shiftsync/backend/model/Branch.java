@@ -33,4 +33,40 @@ public class Branch extends BaseEntity {
 
     @Column(nullable = false)
     private boolean active;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    @Builder.Default
+    private boolean showSalaries = false;
+
+    @Column(nullable = false, columnDefinition = "boolean default true")
+    @Builder.Default
+    private boolean showPhoneNumbers = true;
+
+    @Column(nullable = false, columnDefinition = "boolean default true")
+    @Builder.Default
+    private boolean publicProfiles = true;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    @Builder.Default
+    private boolean autoSchedulingEnabled = false;
+
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'Manual Review'")
+    @Builder.Default
+    private String shiftSwapApprovalMode = "Manual Review";
+
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'Monday'")
+    @Builder.Default
+    private String workWeekStartDay = "Monday";
+
+    @Column(nullable = false, columnDefinition = "integer default 40")
+    @Builder.Default
+    private Integer overtimeThresholdHours = 40;
+
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'RWF - Rwanda'")
+    @Builder.Default
+    private String currencyLocalization = "RWF - Rwanda";
+
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'Operations & Dispensing'")
+    @Builder.Default
+    private String departmentName = "Operations & Dispensing";
 }

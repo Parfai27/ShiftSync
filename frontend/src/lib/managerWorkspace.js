@@ -21,6 +21,10 @@ const emptyWorkspace = {
 		stats: [],
 		days: [],
 		rows: [],
+		weeklyBoard: {
+			label: '',
+			days: [],
+		},
 		legend: [],
 		overview: null,
 		suggestion: null,
@@ -81,11 +85,13 @@ export function resolveProfileImage(profileImageUrl, fallbackName = 'ShiftSync')
 	return `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=0f51ff&color=ffffff`
 }
 
-export function useManagerWorkspace() {
+export function useManagerWorkspace(options = {}) {
 	const session = loadSession()
 	const [workspace, setWorkspace] = useState(emptyWorkspace)
 	const [isLoading, setIsLoading] = useState(true)
 	const [error, setError] = useState('')
+	const rangeDays = options.rangeDays ?? 7
+	const workspacePath = session?.userId ? `/api/manager/workspace/${session.userId}?rangeDays=${rangeDays}` : ''
 
 	async function loadWorkspace() {
 		if (!session?.userId) {
@@ -96,7 +102,7 @@ export function useManagerWorkspace() {
 
 		try {
 			setError('')
-			const payload = await apiRequest(`/api/manager/workspace/${session.userId}`)
+			const payload = await apiRequest(workspacePath)
 			setWorkspace(payload)
 		} catch (loadError) {
 			setError(loadError.message || 'Unable to load manager workspace data.')
@@ -117,7 +123,7 @@ export function useManagerWorkspace() {
 
 			try {
 				setError('')
-				const payload = await apiRequest(`/api/manager/workspace/${session.userId}`)
+				const payload = await apiRequest(workspacePath)
 				if (!cancelled) {
 					setWorkspace(payload)
 				}
@@ -137,7 +143,7 @@ export function useManagerWorkspace() {
 		return () => {
 			cancelled = true
 		}
-	}, [session?.userId])
+	}, [rangeDays, session?.userId, workspacePath])
 
 	return {
 		session,
@@ -147,4 +153,43 @@ export function useManagerWorkspace() {
 		error,
 		reloadWorkspace: loadWorkspace,
 	}
+}
+
+export function fetchManagedEmployeeDetail(managerId, employeeId) {
+	return apiRequest(`/api/manager/${managerId}/employees/${employeeId}`)
+}
+
+export function updateManagedEmployee(employeeId, payload) {
+	return apiRequest(`/api/manager/employees/${employeeId}`, {
+		method: 'PUT',
+		body: JSON.stringify(payload),
+	})
+}
+
+export function archiveManagedEmployee(employeeId, payload) {
+	return apiRequest(`/api/manager/employees/${employeeId}/archive`, {
+		method: 'PATCH',
+		body: JSON.stringify(payload),
+	})
+}
+
+export function createManagedEmployee(payload) {
+	return apiRequest('/api/manager/employees', {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	})
+}
+
+export function updateManagerSettings(payload) {
+	return apiRequest('/api/manager/settings', {
+		method: 'PUT',
+		body: JSON.stringify(payload),
+	})
+}
+
+export function archiveManagerTeam(payload) {
+	return apiRequest('/api/manager/settings/archive-team', {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	})
 }

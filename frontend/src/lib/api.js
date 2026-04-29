@@ -26,5 +26,12 @@ export async function apiRequest(path, options = {}) {
 		return null
 	}
 
-	return response.json()
+	const contentType = response.headers.get('content-type') || ''
+	if (!contentType.includes('application/json')) {
+		const text = await response.text()
+		return text ? text : null
+	}
+
+	const text = await response.text()
+	return text ? JSON.parse(text) : null
 }

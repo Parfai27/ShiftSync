@@ -8,7 +8,6 @@ import {
 	FiHome,
 	FiLayers,
 	FiMenu,
-	FiMoon,
 	FiLogOut,
 	FiPlus,
 	FiSearch,
@@ -22,6 +21,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
 import { resolveProfileImage } from '../../lib/managerWorkspace'
 import { clearSession, loadSession } from '../../lib/session'
+import MobileManagerMenu from '../shared/MobileManagerMenu'
+import ManagerProfileMenu from '../shared/ManagerProfileMenu'
+import ThemeToggleButton from '../shared/ThemeToggleButton'
 
 const metricPresentation = {
 	'Total Employees': { icon: RiGroupLine, accent: 'bg-blue-50 text-blue-600' },
@@ -99,6 +101,16 @@ function resolveAdjustmentTone(status) {
 	return 'bg-rose-50 text-rose-700'
 }
 
+function resolveHeatmapTone(level) {
+	if (level === 'high') {
+		return 'bg-emerald-500'
+	}
+	if (level === 'medium') {
+		return 'bg-amber-400'
+	}
+	return 'bg-rose-300'
+}
+
 export default function Overview() {
 	const navigate = useNavigate()
 	const session = loadSession()
@@ -110,6 +122,7 @@ export default function Overview() {
 	const [rangeDays, setRangeDays] = useState(7)
 	const [adjustmentFilter, setAdjustmentFilter] = useState('ALL')
 	const [isCreatingShift, setIsCreatingShift] = useState(false)
+	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
 	useEffect(() => {
 		let cancelled = false
@@ -198,7 +211,7 @@ export default function Overview() {
 			const refreshed = await apiRequest(`/api/dashboard/overview/${session.userId}?rangeDays=${rangeDays}`)
 			setOverview(refreshed)
 		} catch (requestError) {
-			setActionError(requestError.message || 'Unable to create a new shift.')
+			setActionError(requestError.message || 'Unable to create weekly shifts.')
 		} finally {
 			setIsCreatingShift(false)
 		}
@@ -206,6 +219,14 @@ export default function Overview() {
 
 	return (
 		<main className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#eef4ff_0%,#f7f9ff_38%,#eef2ff_100%)] text-slate-900">
+			<MobileManagerMenu
+				activePath="/overview"
+				isOpen={isMobileMenuOpen}
+				onClose={() => setIsMobileMenuOpen(false)}
+				onPrimaryAction={handleCreateShift}
+				primaryActionDisabled={isCreatingShift}
+				primaryActionLabel={isCreatingShift ? 'Creating Weekly Shifts...' : 'Create Weekly Shifts'}
+			/>
 			<div className="flex h-screen w-full overflow-hidden border border-white/80 bg-white/85 backdrop-blur-xl">
 				<aside className="fixed left-0 top-0 hidden h-screen shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-[#f2f6ff]/80 px-5 py-6 xl:flex" style={{ width: '264px' }}>
 					<div className="flex w-full items-center justify-start gap-3">
@@ -228,7 +249,7 @@ export default function Overview() {
 							onClick={handleCreateShift}
 							className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:bg-[#0b44de] disabled:cursor-not-allowed disabled:opacity-60"
 						>
-							<FiPlus className="h-4 w-4" /> {isCreatingShift ? 'Creating Shift...' : 'Create New Shift'}
+							<FiPlus className="h-4 w-4" /> {isCreatingShift ? 'Creating Weekly Shifts...' : 'Create Weekly Shifts'}
 						</button>
 						<div className="space-y-1 text-sm text-slate-600">
 							<Link className="flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-white/70" to="/manager-settings"><FiSettings className="h-4 w-4" /> Settings</Link>
@@ -246,7 +267,7 @@ export default function Overview() {
 				<div className="dashboard-main-offset flex min-w-0 flex-1 flex-col h-screen overflow-hidden">
 					<header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/75 px-4 py-4 backdrop-blur-xl sm:px-6 xl:px-8">
 						<div className="flex items-center gap-3 xl:hidden">
-							<button className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700"><FiMenu className="h-5 w-5" /></button>
+							<button className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700" onClick={() => setIsMobileMenuOpen(true)} type="button"><FiMenu className="h-5 w-5" /></button>
 							<div className="flex min-w-0 items-center gap-3">
 								<span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#0f51ff] text-xs font-black text-white">S</span>
 								<div className="min-w-0">
@@ -277,17 +298,8 @@ export default function Overview() {
 									<FiBell className="h-4 w-4" />
 									{overview.unreadNotifications > 0 ? <span className="absolute right-2 top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">{overview.unreadNotifications}</span> : null}
 								</button>
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiMoon className="h-4 w-4" /></button>
-								<div className="flex items-center gap-3 rounded-full bg-white px-3 py-2">
-									<div className="text-right leading-tight">
-										<div className="text-sm font-bold text-slate-900">{displayName}</div>
-										<div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{displayRole}</div>
-									</div>
-									<div className="h-10 w-10 overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f51ff,#7ea4ff)] ring-2 ring-[#eef3ff]">
-										<img alt={displayName} className="h-full w-full object-cover" src={profileImage} />
-									</div>
-									<FiChevronDown className="h-4 w-4 text-slate-400" />
-								</div>
+								<ThemeToggleButton />
+								<ManagerProfileMenu name={displayName} profileImageUrl={profileImage} role={displayRole} />
 							</div>
 						</div>
 					</header>
@@ -342,25 +354,52 @@ export default function Overview() {
 								<div className="flex flex-wrap items-center justify-between gap-3">
 									<div>
 										<h2 className="text-xl font-extrabold tracking-[-0.04em] text-slate-950">Attendance Overview</h2>
-										<p className="mt-1 text-sm text-slate-500">Daily check-in volume vs predicted attendance</p>
+										<p className="mt-1 text-sm text-slate-500">Daily staffing coverage across the selected period, shown as a percentage of required staff filled.</p>
 									</div>
 									<div className="flex items-center gap-4 text-xs font-semibold text-slate-500">
-										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#0f51ff]" />Actual</span>
-										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-slate-300" />Predicted</span>
+										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#0f51ff]" />Coverage</span>
+										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-emerald-400" />Healthy Target</span>
 									</div>
 								</div>
 
 								<div className="mt-5 rounded-3xl bg-[linear-gradient(180deg,#f6f8ff_0%,#ffffff_100%)] p-4 sm:p-6">
-									<div className="grid h-82.5 grid-cols-7 items-end gap-3 sm:h-90">
-										{overview.attendanceBars.map((height, index) => (
-											<div key={overview.weekLabels[index]} className="flex h-full flex-col items-center justify-end gap-3">
-												<div className="relative flex h-full w-full items-end justify-center rounded-[18px] bg-white/40 px-2 pb-2">
-													<div className="w-full rounded-2xl bg-[linear-gradient(180deg,rgba(15,81,255,0.95)_0%,rgba(15,81,255,0.42)_100%)]" style={{ height: `${height}%` }} />
-													<div className="absolute bottom-2 left-1/2 h-[56%] w-[44%] -translate-x-1/2 rounded-[14px] bg-slate-300/70" />
-												</div>
-												<span className="text-[11px] font-extrabold tracking-[0.18em] text-slate-500">{overview.weekLabels[index]}</span>
+									<div className="grid grid-cols-[40px_minmax(0,1fr)] gap-4">
+										<div className="flex h-72 flex-col justify-between pb-10 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+											<span>100</span>
+											<span>75</span>
+											<span>50</span>
+											<span>25</span>
+											<span>0</span>
+										</div>
+										<div className="relative">
+											<div className="pointer-events-none absolute inset-0">
+												<div className="absolute inset-x-0 top-[15%] border-t border-dashed border-emerald-300/80" />
+												<div className="absolute inset-x-0 top-1/4 border-t border-slate-200" />
+												<div className="absolute inset-x-0 top-1/2 border-t border-slate-200" />
+												<div className="absolute inset-x-0 top-3/4 border-t border-slate-200" />
+												<div className="absolute inset-x-0 bottom-10 border-t border-slate-200" />
 											</div>
-										))}
+											<div className="grid h-72 grid-cols-7 items-end gap-3">
+												{overview.attendanceBars.map((height, index) => (
+													<div key={overview.weekLabels[index]} className="flex h-full flex-col items-center justify-end gap-2">
+														<div className="text-[11px] font-extrabold text-slate-500">{height}%</div>
+														<div className="relative flex h-full w-full items-end rounded-[18px] bg-white/70 px-2 pb-2 shadow-inner">
+															<div
+																className={`w-full rounded-2xl ${height >= 85 ? 'bg-[linear-gradient(180deg,#10b981_0%,#34d399_100%)]' : height >= 60 ? 'bg-[linear-gradient(180deg,#0f51ff_0%,#6a95ff_100%)]' : 'bg-[linear-gradient(180deg,#f59e0b_0%,#fbbf24_100%)]'}`}
+																style={{ height: `${Math.max(height, 8)}%` }}
+															/>
+														</div>
+														<span className="text-[11px] font-extrabold tracking-[0.18em] text-slate-500">{overview.weekLabels[index]}</span>
+													</div>
+												))}
+											</div>
+											<div className="mt-4 flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm">
+												<div className="font-semibold text-slate-700">Average coverage this week</div>
+												<div className="text-lg font-black text-slate-950">
+													{overview.attendanceBars.length ? `${Math.round(overview.attendanceBars.reduce((sum, value) => sum + value, 0) / overview.attendanceBars.length)}%` : '--'}
+												</div>
+											</div>
+										</div>
 									</div>
 								</div>
 							</article>
@@ -429,10 +468,28 @@ export default function Overview() {
 							<div className="space-y-5">
 								<article className="rounded-[26px] border border-slate-200/80 bg-white p-5 sm:p-6">
 									<div className="mb-4 text-[13px] font-extrabold uppercase tracking-[0.22em] text-slate-500">Coverage Heatmap</div>
-									<div className="grid grid-cols-7 gap-2">
-										{overview.heatmap.map((level, index) => <span key={index} className={`aspect-square rounded-md ${level === 'high' ? 'bg-blue-600' : level === 'medium' ? 'bg-blue-300' : 'bg-slate-200'}`} />)}
+									<div className="space-y-3">
+										<div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))] gap-2 text-center text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+											<span />
+											{weekLabels.map((label) => <span key={label}>{label}</span>)}
+										</div>
+										{[0, 1].map((row) => (
+											<div key={row} className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))] gap-2">
+												<div className="flex items-center text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+													{row === 0 ? 'Week 1' : 'Week 2'}
+												</div>
+												{overview.heatmap.slice(row * 7, row * 7 + 7).map((level, index) => (
+													<span key={`${row}-${index}`} className={`aspect-square rounded-lg ${resolveHeatmapTone(level)}`} />
+												))}
+											</div>
+										))}
 									</div>
-									<p className="mt-4 text-sm leading-6 text-slate-500">Critical staffing gaps detected on Thursday afternoons. Consider reallocating flex-time staff.</p>
+									<div className="mt-4 flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-500">
+										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-emerald-500" />Fully covered</span>
+										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-amber-400" />Partial coverage</span>
+										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-rose-300" />Gap risk</span>
+									</div>
+									<p className="mt-4 text-sm leading-6 text-slate-500">Use this view to spot weak coverage patterns quickly across the two-week schedule window.</p>
 								</article>
 
 								<article className="rounded-[26px] bg-[#0f51ff] p-5 text-white sm:p-6">

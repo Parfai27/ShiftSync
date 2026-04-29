@@ -1,13 +1,16 @@
 package com.shiftsync.backend.service;
 
 import com.shiftsync.backend.dto.AuthDtos.AuthResponse;
+import com.shiftsync.backend.model.AuditLog;
 import com.shiftsync.backend.dto.AuthDtos.LoginRequest;
 import com.shiftsync.backend.dto.AuthDtos.RegisterRequest;
 import com.shiftsync.backend.model.Branch;
 import com.shiftsync.backend.model.Role;
 import com.shiftsync.backend.model.User;
+import com.shiftsync.backend.repository.AuditLogRepository;
 import com.shiftsync.backend.repository.BranchRepository;
 import com.shiftsync.backend.repository.UserRepository;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -18,15 +21,22 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
+    private final AuditLogRepository auditLogRepository;
     private final PasswordEncoder passwordEncoder;
 
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.email())
-            .orElseThrow(() -> new IllegalArgumentException("Invalid email or password"));
-
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        User user = userRepository.findByEmail(request.email()).orElse(null);
+        if (user == null) {
+            logLoginActivity(null, "Login failed", "Unknown email: " + request.email());
             throw new IllegalArgumentException("Invalid email or password");
         }
+
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            logLoginActivity(user, "Login failed", "Incorrect password for " + user.getEmail());
+            throw new IllegalArgumentException("Invalid email or password");
+        }
+
+        logLoginActivity(user, "Login successful", "User signed in with email " + user.getEmail());
 
         return new AuthResponse(
             user.getId(),
@@ -58,6 +68,7 @@ public class AuthService {
             .build();
 
         userRepository.save(user);
+        logLoginActivity(user, "Registration successful", "New " + user.getRole().name() + " account registered with email " + user.getEmail());
         return new AuthResponse(
             user.getId(),
             user.getFullName(),
@@ -67,6 +78,18 @@ public class AuthService {
             user.getBranch() != null ? user.getBranch().getId() : null,
             user.getProfileImageUrl(),
             "Registration successful"
+        );
+    }
+
+    private void logLoginActivity(User actor, String action, String details) {
+        auditLogRepository.save(
+            AuditLog.builder()
+                .actor(actor)
+                .action(action)
+                .targetModule("Authentication")
+                .actionTime(LocalDateTime.now())
+                .details(details)
+                .build()
         );
     }
 }

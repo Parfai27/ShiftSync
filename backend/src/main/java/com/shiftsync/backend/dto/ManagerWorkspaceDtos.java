@@ -29,6 +29,7 @@ public final class ManagerWorkspaceDtos {
     }
 
     public record EmployeeDetail(
+        Long userId,
         String name,
         String role,
         String employeeCode,
@@ -81,6 +82,40 @@ public final class ManagerWorkspaceDtos {
     ) {
     }
 
+    public record ScheduledRoleSlot(
+        String role,
+        String employeeName,
+        String employeeAvatar,
+        String status
+    ) {
+    }
+
+    public record ShiftLane(
+        String shiftName,
+        String window,
+        String tone,
+        long assignedStaff,
+        int requiredStaff,
+        String status,
+        List<ScheduledRoleSlot> roles
+    ) {
+    }
+
+    public record SchedulingBoardDay(
+        String day,
+        String date,
+        String fullDate,
+        boolean hasGap,
+        List<ShiftLane> shifts
+    ) {
+    }
+
+    public record WeeklyScheduleBoard(
+        String label,
+        List<SchedulingBoardDay> days
+    ) {
+    }
+
     public record LegendItem(
         String label,
         String tone
@@ -109,6 +144,7 @@ public final class ManagerWorkspaceDtos {
         List<SchedulingStat> stats,
         List<SchedulingDay> days,
         List<ScheduleRow> rows,
+        WeeklyScheduleBoard weeklyBoard,
         List<LegendItem> legend,
         SchedulingOverviewCard overview,
         SchedulingSuggestion suggestion
@@ -204,10 +240,13 @@ public final class ManagerWorkspaceDtos {
     }
 
     public record PolicyCard(
+        Long id,
         String title,
         String description,
+        String category,
         String tone,
         String badge,
+        boolean active,
         String progressLabel,
         String progressValue,
         String progressTone,

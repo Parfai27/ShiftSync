@@ -21,11 +21,13 @@ import Profile from './components/Employee/profile.jsx'
 import EmployeeNotifications from './components/Employee/notifications.jsx'
 import PersonalSettings from './components/Employee/personal_settings.jsx'
 import Landing from './pages/landing.jsx'
+import SessionManager from './components/shared/SessionManager.jsx'
 
 function App() {
  
   return (
     <BrowserRouter>
+      <SessionManager />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />

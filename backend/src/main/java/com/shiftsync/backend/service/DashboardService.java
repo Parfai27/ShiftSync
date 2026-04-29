@@ -44,6 +44,7 @@ public class DashboardService {
         List<User> branchEmployees = userRepository.findByRole(Role.EMPLOYEE).stream()
             .filter(user -> user.getBranch() != null && manager.getBranch() != null)
             .filter(user -> user.getBranch().getId().equals(manager.getBranch().getId()))
+            .filter(User::isActive)
             .toList();
 
         List<Shift> branchShifts = shiftRepository.findByBranchId(manager.getBranch().getId()).stream()
@@ -68,7 +69,7 @@ public class DashboardService {
             .count();
 
         List<MetricCard> metrics = List.of(
-            new MetricCard("Total Employees", String.valueOf(branchEmployees.size()), branchEmployees.isEmpty() ? "No staff" : "Branch"),
+            new MetricCard("Total Employees", String.valueOf(branchEmployees.size()), branchEmployees.isEmpty() ? "No staff" : "Active"),
             new MetricCard("Active Shifts", String.valueOf(branchShifts.size()), branchShifts.isEmpty() ? "No shifts" : "LIVE"),
             new MetricCard("Coverage %", coverage + "%", coverage >= 90 ? "Optimal" : "Review"),
             new MetricCard("Pending Adjustments", String.valueOf(pendingAdjustments), pendingAdjustments > 0 ? "Review" : "Clear")

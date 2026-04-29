@@ -35,6 +35,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -43,6 +44,8 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class DataSeeder implements CommandLineRunner {
+    private static final Set<String> CANONICAL_SHIFT_NAMES = Set.of("Evening Shift", "1st Shift", "2nd Shift");
+
 
     private final BranchRepository branchRepository;
     private final UserRepository userRepository;
@@ -61,16 +64,18 @@ public class DataSeeder implements CommandLineRunner {
     @Override
     public void run(String... args) {
         Branch branch = branchRepository.findByCode("NGABO-MAIN")
-            .map(existing -> updateBranch(existing, "Ngabo Pharmacy - Main Branch", "Kigali, Rwanda"))
+            .map(existing -> updateBranch(existing, "Ngabo Pharmacy", "Kigali, Rwanda"))
             .orElseGet(() -> branchRepository.save(
                 Branch.builder()
-                    .name("Ngabo Pharmacy - Main Branch")
+                    .name("Ngabo Pharmacy")
                     .code("NGABO-MAIN")
                     .location("Kigali, Rwanda")
                     .type(BranchType.RETAIL_PHARMACY)
                     .active(true)
                     .build()
             ));
+
+        removeLegacyShiftModelData(branch);
 
         User admin = upsertUser(
             "admin",
@@ -138,39 +143,84 @@ public class DataSeeder implements CommandLineRunner {
             branch,
             "https://ui-avatars.com/api/?name=Claude+Irakoze&background=2747b3&color=ffffff"
         );
+        User staff5 = upsertUser(
+            "pacifique.mugisha",
+            "Pacifique Mugisha",
+            "pacifique.mugisha@ngabopharmacy.rw",
+            "pacifique123",
+            Role.EMPLOYEE,
+            branch,
+            "https://ui-avatars.com/api/?name=Pacifique+Mugisha&background=1e40af&color=ffffff"
+        );
+        User staff6 = upsertUser(
+            "brenda.uwingabiye",
+            "Brenda Uwingabiye",
+            "brenda.uwingabiye@ngabopharmacy.rw",
+            "brenda123",
+            Role.EMPLOYEE,
+            branch,
+            "https://ui-avatars.com/api/?name=Brenda+Uwingabiye&background=3730a3&color=ffffff"
+        );
+        User staff7 = upsertUser(
+            "jeanclaude.hategekimana",
+            "Jean Claude Hategekimana",
+            "jeanclaude.hategekimana@ngabopharmacy.rw",
+            "jeanclaude123",
+            Role.EMPLOYEE,
+            branch,
+            "https://ui-avatars.com/api/?name=Jean+Claude+Hategekimana&background=2563eb&color=ffffff"
+        );
+        User staff8 = upsertUser(
+            "chantal.mukantwari",
+            "Chantal Mukantwari",
+            "chantal.mukantwari@ngabopharmacy.rw",
+            "chantal123",
+            Role.EMPLOYEE,
+            branch,
+            "https://ui-avatars.com/api/?name=Chantal+Mukantwari&background=1d4ed8&color=ffffff"
+        );
 
-        upsertProfile(manager, "MGR-001", "Branch Shift Manager", "0788001101", LocalDate.of(2021, 3, 14), "0788001199");
-        upsertProfile(pharmacist, "EMP-101", "Clinical Pharmacist", "0788002201", LocalDate.of(2022, 5, 18), "0788002299");
-        upsertProfile(staff1, "EMP-102", "Pharmacy Technician", "0788002202", LocalDate.of(2023, 1, 9), "0788002298");
-        upsertProfile(staff2, "EMP-103", "Inventory Pharmacist", "0788002203", LocalDate.of(2022, 8, 2), "0788002297");
-        upsertProfile(staff3, "EMP-104", "Front Desk Cashier", "0788002204", LocalDate.of(2024, 2, 12), "0788002296");
-        upsertProfile(staff4, "EMP-105", "Dispensing Assistant", "0788002205", LocalDate.of(2023, 11, 3), "0788002295");
+        upsertProfile(manager, "MGR-001", "Shift Manager", "0788001101", LocalDate.of(2021, 3, 14), "0788001199");
+        upsertProfile(pharmacist, "EMP-101", "Pharmacist", "0788002201", LocalDate.of(2022, 5, 18), "0788002299");
+        upsertProfile(staff1, "EMP-102", "Pharmacy Assistant / Attendant", "0788002202", LocalDate.of(2023, 1, 9), "0788002298");
+        upsertProfile(staff2, "EMP-103", "Store Officer", "0788002203", LocalDate.of(2022, 8, 2), "0788002297");
+        upsertProfile(staff3, "EMP-104", "Cashier", "0788002204", LocalDate.of(2024, 2, 12), "0788002296");
+        upsertProfile(staff4, "EMP-105", "Pharmacist", "0788002205", LocalDate.of(2023, 11, 3), "0788002295");
+        upsertProfile(staff5, "EMP-106", "Pharmacy Assistant / Attendant", "0788002206", LocalDate.of(2023, 7, 20), "0788002294");
+        upsertProfile(staff6, "EMP-107", "Store Officer", "0788002207", LocalDate.of(2022, 12, 6), "0788002293");
+        upsertProfile(staff7, "EMP-108", "Cashier", "0788002208", LocalDate.of(2024, 1, 18), "0788002292");
+        upsertProfile(staff8, "EMP-109", "Pharmacist", "0788002209", LocalDate.of(2024, 4, 3), "0788002291");
 
-        Shift opening = upsertShift(branch, "Opening Shift", LocalDate.now().plusDays(1), LocalTime.of(7, 0), LocalTime.of(15, 0), 4, 4, ShiftStatus.FULL);
-        Shift mid = upsertShift(branch, "Dispensing Shift", LocalDate.now().plusDays(2), LocalTime.of(8, 0), LocalTime.of(16, 0), 4, 3, ShiftStatus.PARTIALLY_STAFFED);
-        Shift closing = upsertShift(branch, "Closing Shift", LocalDate.now().plusDays(3), LocalTime.of(14, 0), LocalTime.of(22, 0), 3, 2, ShiftStatus.UNDERSTAFFED);
-        Shift weekend = upsertShift(branch, "Weekend Coverage", LocalDate.now().plusDays(5), LocalTime.of(9, 0), LocalTime.of(17, 0), 3, 3, ShiftStatus.FULL);
+        LocalDate weekStart = LocalDate.now().with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.MONDAY));
+        Shift mondayNight = upsertShift(branch, "Evening Shift", weekStart, LocalTime.of(23, 0), LocalTime.of(7, 0), 4, 4, ShiftStatus.FULL);
+        Shift mondayFirst = upsertShift(branch, "1st Shift", weekStart, LocalTime.of(7, 0), LocalTime.of(15, 0), 4, 4, ShiftStatus.FULL);
+        Shift mondaySecond = upsertShift(branch, "2nd Shift", weekStart, LocalTime.of(15, 0), LocalTime.of(23, 0), 4, 3, ShiftStatus.PARTIALLY_STAFFED);
+        Shift tuesdayNight = upsertShift(branch, "Evening Shift", weekStart.plusDays(1), LocalTime.of(23, 0), LocalTime.of(7, 0), 4, 2, ShiftStatus.UNDERSTAFFED);
 
-        upsertAssignment(opening, pharmacist, LocalDateTime.now().minusDays(2));
-        upsertAssignment(opening, staff1, LocalDateTime.now().minusDays(2));
-        upsertAssignment(opening, staff2, LocalDateTime.now().minusDays(2));
-        upsertAssignment(opening, staff3, LocalDateTime.now().minusDays(2));
-        upsertAssignment(mid, pharmacist, LocalDateTime.now().minusDays(1));
-        upsertAssignment(mid, staff1, LocalDateTime.now().minusDays(1));
-        upsertAssignment(mid, staff4, LocalDateTime.now().minusDays(1));
-        upsertAssignment(closing, staff2, LocalDateTime.now().minusDays(1));
-        upsertAssignment(closing, staff3, LocalDateTime.now().minusDays(1));
-        upsertAssignment(weekend, pharmacist, LocalDateTime.now().minusHours(10));
-        upsertAssignment(weekend, staff2, LocalDateTime.now().minusHours(10));
-        upsertAssignment(weekend, staff4, LocalDateTime.now().minusHours(10));
+        upsertAssignment(mondayNight, pharmacist, LocalDateTime.now().minusDays(2));
+        upsertAssignment(mondayNight, staff1, LocalDateTime.now().minusDays(2));
+        upsertAssignment(mondayNight, staff2, LocalDateTime.now().minusDays(2));
+        upsertAssignment(mondayNight, staff3, LocalDateTime.now().minusDays(2));
 
-        upsertAvailability(staff1, LocalDate.now().plusDays(3), AvailabilityStatus.AVAILABLE, LocalTime.of(14, 0), LocalTime.of(22, 0), "Available to cover the late dispensing window.");
-        upsertAvailability(staff4, LocalDate.now().plusDays(3), AvailabilityStatus.PREFERRED, LocalTime.of(12, 0), LocalTime.of(20, 0), "Can extend by one hour for stock reconciliation.");
-        upsertAvailability(staff3, LocalDate.now().plusDays(4), AvailabilityStatus.UNAVAILABLE, null, null, "Training day at head office.");
+        upsertAssignment(mondayFirst, staff4, LocalDateTime.now().minusDays(2));
+        upsertAssignment(mondayFirst, staff5, LocalDateTime.now().minusDays(2));
+        upsertAssignment(mondayFirst, staff6, LocalDateTime.now().minusDays(2));
+        upsertAssignment(mondayFirst, staff7, LocalDateTime.now().minusDays(2));
 
-        upsertAdjustment(pharmacist, mid, "Shift Swap", "Swap dispensing shift with weekend coverage after ward stock count.", AdjustmentStatus.PENDING, null);
-        upsertAdjustment(staff2, closing, "Overtime Request", "Extend the closing shift by two hours for monthly inventory balancing.", AdjustmentStatus.APPROVED, LocalDateTime.now().minusHours(6));
-        upsertAdjustment(staff3, opening, "Time Off Request", "Request leave for family medical appointment during opening rotation.", AdjustmentStatus.REJECTED, LocalDateTime.now().minusDays(1));
+        upsertAssignment(mondaySecond, staff8, LocalDateTime.now().minusDays(1));
+        upsertAssignment(mondaySecond, staff1, LocalDateTime.now().minusDays(1));
+        upsertAssignment(mondaySecond, staff2, LocalDateTime.now().minusDays(1));
+
+        upsertAssignment(tuesdayNight, staff4, LocalDateTime.now().minusHours(10));
+        upsertAssignment(tuesdayNight, staff5, LocalDateTime.now().minusHours(10));
+
+        upsertAvailability(staff3, weekStart.plusDays(1), AvailabilityStatus.PREFERRED, LocalTime.of(23, 0), LocalTime.of(7, 0), "Available for overnight cashier coverage.");
+        upsertAvailability(staff6, weekStart.plusDays(1), AvailabilityStatus.AVAILABLE, LocalTime.of(23, 0), LocalTime.of(7, 0), "Ready for overnight store supervision.");
+        upsertAvailability(staff7, weekStart.plusDays(2), AvailabilityStatus.UNAVAILABLE, null, null, "Off duty for personal leave.");
+
+        upsertAdjustment(pharmacist, mondaySecond, "Shift Swap", "Swap the second shift with another pharmacist for the Tuesday evening rotation.", AdjustmentStatus.PENDING, null);
+        upsertAdjustment(staff2, tuesdayNight, "Overtime Request", "Extend the overnight store officer coverage by one hour for stock receiving.", AdjustmentStatus.APPROVED, LocalDateTime.now().minusHours(6));
+        upsertAdjustment(staff3, mondayNight, "Time Off Request", "Request leave from the overnight cashier shift for a family commitment.", AdjustmentStatus.REJECTED, LocalDateTime.now().minusDays(1));
 
         upsertAnnouncement(
             branch,
@@ -187,10 +237,10 @@ public class DataSeeder implements CommandLineRunner {
             LocalDateTime.now().minusDays(1)
         );
 
-        upsertNotification(manager, "Urgent: closing shift below safe coverage", "The closing shift on " + closing.getShiftDate() + " still requires one more qualified staff member.", NotificationPriority.HIGH, false);
-        upsertNotification(manager, "Shift swap request awaiting review", "Eric Ndayisaba submitted a live shift adjustment request for the dispensing rota.", NotificationPriority.MEDIUM, false);
+        upsertNotification(manager, "Urgent: overnight shift below safe coverage", "The evening shift on " + tuesdayNight.getShiftDate() + " still requires cashier and store officer coverage.", NotificationPriority.HIGH, false);
+        upsertNotification(manager, "Shift swap request awaiting review", "Eric Ndayisaba submitted a live shift adjustment request for the second shift rota.", NotificationPriority.MEDIUM, false);
         upsertNotification(manager, "Compliance reminder", "Controlled medicines documentation is due before branch opening tomorrow.", NotificationPriority.LOW, true);
-        upsertNotification(pharmacist, "Upcoming dispensing shift", "You are scheduled for dispensing coverage tomorrow at 08:00.", NotificationPriority.MEDIUM, false);
+        upsertNotification(pharmacist, "Upcoming overnight shift", "You are scheduled for overnight pharmacist coverage at 23:00.", NotificationPriority.MEDIUM, false);
 
         upsertPolicy(branch, "Maximum Weekly Hours", "Staff may not exceed 48 total hours within a rolling 7-day period without branch manager approval.", "Scheduling", true);
         upsertPolicy(branch, "Mandatory Rest Period", "Maintain at least 11 continuous hours between closing and opening shifts for all pharmacy staff.", "Scheduling", true);
@@ -200,7 +250,7 @@ public class DataSeeder implements CommandLineRunner {
         upsertPayroll(staff2, LocalDate.now().minusDays(14), LocalDate.now(), new BigDecimal("68.0"), new BigDecimal("2.0"), new BigDecimal("171500.00"));
 
         upsertAuditLog(admin, "Updated pharmacy staffing policy", "Compliance", LocalDateTime.now().minusHours(9), "Reinforced handover coverage for controlled medicines at branch close.");
-        upsertAuditLog(manager, "Approved overtime request", "Scheduling", LocalDateTime.now().minusHours(6), "Approved extended inventory balancing support for closing shift.");
+        upsertAuditLog(manager, "Approved overtime request", "Scheduling", LocalDateTime.now().minusHours(6), "Approved extended inventory balancing support for the overnight store coverage.");
         upsertAuditLog(manager, "Reviewed branch notification queue", "Notifications", LocalDateTime.now().minusHours(3), "Cleared one completed reminder and left urgent items active for follow-up.");
     }
 
@@ -210,6 +260,27 @@ public class DataSeeder implements CommandLineRunner {
         branch.setType(BranchType.RETAIL_PHARMACY);
         branch.setActive(true);
         return branchRepository.save(branch);
+    }
+
+    private void removeLegacyShiftModelData(Branch branch) {
+        List<Shift> legacyShifts = shiftRepository.findByBranchId(branch.getId()).stream()
+            .filter(shift -> shift.getName() == null || !CANONICAL_SHIFT_NAMES.contains(shift.getName()))
+            .toList();
+
+        if (legacyShifts.isEmpty()) {
+            return;
+        }
+
+        for (Shift shift : legacyShifts) {
+            shiftAdjustmentRequestRepository.deleteAll(
+                shiftAdjustmentRequestRepository.findAll().stream()
+                    .filter(request -> request.getShift() != null && request.getShift().getId().equals(shift.getId()))
+                    .toList()
+            );
+            shiftAssignmentRepository.deleteAll(shiftAssignmentRepository.findByShiftId(shift.getId()));
+        }
+
+        shiftRepository.deleteAll(legacyShifts);
     }
 
     private User upsertUser(String username, String fullName, String email, String rawPassword, Role role, Branch branch, String profileImageUrl) {
