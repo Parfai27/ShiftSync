@@ -132,15 +132,23 @@ export default function ManagerSettings() {
 		window.setTimeout(() => setActionMessage(''), 2000)
 	}
 
-	async function handleSaveChanges() {
+async function handleSaveChanges() {
 		const overtimeThresholdHours = Number.parseInt(formState.overtimeThresholdHours, 10)
 		if (!Number.isFinite(overtimeThresholdHours) || overtimeThresholdHours < 1) {
 			setActionError('Overtime threshold must be a valid number greater than zero.')
 			return
 		}
+		if (overtimeThresholdHours > 168) {
+			setActionError('Overtime threshold cannot be more than 168 hours in one week.')
+			return
+		}
 
 		if (!formState.departmentName.trim()) {
 			setActionError('Department focus cannot be empty.')
+			return
+		}
+		if (formState.departmentName.trim().length < 3) {
+			setActionError('Department focus must be at least 3 characters long.')
 			return
 		}
 

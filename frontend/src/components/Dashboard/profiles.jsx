@@ -54,6 +54,10 @@ const emptyCreateForm = {
 	phoneNumber: '',
 }
 
+const EMPLOYEE_ROLE_OPTIONS = ['Pharmacist', 'Pharmacy Assistant / Attendant']
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const phonePattern = /^\+?[0-9]{10,15}$/
+
 const PAGE_SIZE = 8
 
 export default function Profiles() {
@@ -74,6 +78,7 @@ export default function Profiles() {
 	const [showCreateForm, setShowCreateForm] = useState(false)
 	const [createForm, setCreateForm] = useState(emptyCreateForm)
 	const [isCreating, setIsCreating] = useState(false)
+	const [createResult, setCreateResult] = useState(null)
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 	const [currentPage, setCurrentPage] = useState(1)
 
@@ -177,6 +182,31 @@ export default function Profiles() {
 		}))
 	}
 
+	function validateEmployeePayload(payload) {
+		if (!payload.fullName.trim()) {
+			return 'Employee full name is required.'
+		}
+		if (payload.fullName.trim().length < 3) {
+			return 'Employee full name must be at least 3 characters long.'
+		}
+		if (!payload.email.trim()) {
+			return 'Employee email is required.'
+		}
+		if (!emailPattern.test(payload.email.trim())) {
+			return 'Enter a valid email address.'
+		}
+		if (!payload.jobTitle.trim()) {
+			return 'Employee role is required.'
+		}
+		if (!EMPLOYEE_ROLE_OPTIONS.includes(payload.jobTitle.trim())) {
+			return 'Employee role must be either Pharmacist or Pharmacy Assistant / Attendant.'
+		}
+		if (payload.phoneNumber.trim() && !phonePattern.test(payload.phoneNumber.trim())) {
+			return 'Phone number must contain 10 to 15 digits.'
+		}
+		return ''
+	}
+
 	function handleSelectEmployee(employeeId) {
 		if (employeeId === selectedEmployeeId) {
 			return
@@ -190,6 +220,13 @@ export default function Profiles() {
 
 	async function handleSaveChanges() {
 		if (!featured?.userId || !session?.userId) {
+			return
+		}
+
+		const validationMessage = validateEmployeePayload(form)
+		if (validationMessage) {
+			setActionError(validationMessage)
+			setActionMessage('')
 			return
 		}
 
@@ -250,10 +287,18 @@ export default function Profiles() {
 			return
 		}
 
+		const validationMessage = validateEmployeePayload(createForm)
+		if (validationMessage) {
+			setActionError(validationMessage)
+			setActionMessage('')
+			return
+		}
+
 		try {
 			setIsCreating(true)
 			setActionError('')
 			setActionMessage('')
+			setCreateResult(null)
 			const createdEmployee = await createManagedEmployee({
 				managerId: session.userId,
 				fullName: createForm.fullName.trim(),
@@ -263,9 +308,13 @@ export default function Profiles() {
 			})
 			await reloadWorkspace()
 			setSelectedEmployeeId(createdEmployee.userId)
-			setShowCreateForm(false)
 			setCreateForm(emptyCreateForm)
-			setActionMessage(`Employee created. Login: ${createdEmployee.email} / temporary password: ${createdEmployee.temporaryPassword}`)
+			setCreateResult(createdEmployee)
+			setActionMessage(
+				createdEmployee.emailDelivered
+					? `Employee created. Login credentials were emailed to ${createdEmployee.email}.`
+					: `Employee created, but the credentials email could not be sent. Temporary password: ${createdEmployee.temporaryPassword}`
+			)
 		} catch (createError) {
 			setActionError(createError.message || 'Unable to create employee account.')
 		} finally {
@@ -399,6 +448,7 @@ export default function Profiles() {
 										onClick={() => {
 											setShowCreateForm((current) => !current)
 											setActionError('')
+											setCreateResult(null)
 										}}
 										type="button"
 									>
@@ -439,7 +489,12 @@ export default function Profiles() {
 										</label>
 										<label className="space-y-2">
 											<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Job Title</div>
-											<input className="w-full rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#0f51ff]" name="jobTitle" onChange={handleCreateFieldChange} value={createForm.jobTitle} />
+											<select className="w-full rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#0f51ff]" name="jobTitle" onChange={handleCreateFieldChange} value={createForm.jobTitle}>
+												<option value="">Select employee role</option>
+												{EMPLOYEE_ROLE_OPTIONS.map((role) => (
+													<option key={role} value={role}>{role}</option>
+												))}
+											</select>
 										</label>
 										<label className="space-y-2">
 											<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Phone Number</div>
@@ -453,6 +508,7 @@ export default function Profiles() {
 											onClick={() => {
 												setShowCreateForm(false)
 												setCreateForm(emptyCreateForm)
+												setCreateResult(null)
 											}}
 											type="button"
 										>
@@ -472,6 +528,38 @@ export default function Profiles() {
 											{isCreating ? 'Creating...' : 'Create Employee'}
 										</button>
 									</div>
+									{createResult ? (
+										<div className={`mt-5 rounded-2xl border px-4 py-4 ${createResult.emailDelivered ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+											<div className="flex flex-wrap items-center justify-between gap-3">
+												<div>
+													<div className="text-sm font-black text-slate-900">{createResult.fullName}</div>
+													<div className="mt-1 text-xs font-semibold text-slate-600">{createResult.email}</div>
+												</div>
+												<span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.16em] ${createResult.emailDelivered ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+													{createResult.emailDelivered ? 'Email Sent' : 'Email Failed'}
+												</span>
+											</div>
+											<div className="mt-3 text-sm text-slate-700">
+												{createResult.emailDelivered
+													? 'The employee will receive their login credentials by email and will be required to change the temporary password on first sign in.'
+													: 'The account was created, but the credentials email was not delivered. Share the temporary password manually so the employee can sign in and change it immediately.'}
+											</div>
+											<div className="mt-3 grid gap-3 sm:grid-cols-2">
+												<div className="rounded-xl bg-white/80 px-3 py-3">
+													<div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-500">Employee Code</div>
+													<div className="mt-1 text-sm font-bold text-slate-900">{createResult.employeeCode}</div>
+												</div>
+												<div className="rounded-xl bg-white/80 px-3 py-3">
+													<div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-500">
+														{createResult.emailDelivered ? 'Delivery Status' : 'Temporary Password'}
+													</div>
+													<div className={`mt-1 text-sm font-bold ${createResult.emailDelivered ? 'text-emerald-700' : 'text-slate-900'}`}>
+														{createResult.emailDelivered ? 'Credentials emailed successfully' : createResult.temporaryPassword}
+													</div>
+												</div>
+											</div>
+										</div>
+									) : null}
 								</div>
 							) : null}
 
@@ -572,7 +660,12 @@ export default function Profiles() {
 												</label>
 												<label className="space-y-2">
 													<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Role</div>
-													<input className="w-full rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#0f51ff]" disabled={!isEditing || detailBusy} name="jobTitle" onChange={handleFieldChange} value={form.jobTitle} />
+													<select className="w-full rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#0f51ff]" disabled={!isEditing || detailBusy} name="jobTitle" onChange={handleFieldChange} value={form.jobTitle}>
+														<option value="">Select employee role</option>
+														{EMPLOYEE_ROLE_OPTIONS.map((role) => (
+															<option key={role} value={role}>{role}</option>
+														))}
+													</select>
 												</label>
 												<label className="space-y-2">
 													<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Email</div>

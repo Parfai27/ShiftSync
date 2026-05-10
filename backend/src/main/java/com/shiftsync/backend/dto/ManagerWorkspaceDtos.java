@@ -105,6 +105,7 @@ public final class ManagerWorkspaceDtos {
         String day,
         String date,
         String fullDate,
+        String isoDate,
         boolean hasGap,
         List<ShiftLane> shifts
     ) {

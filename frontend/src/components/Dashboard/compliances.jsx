@@ -79,6 +79,8 @@ const emptyPolicyForm = {
 	category: 'Scheduling',
 }
 
+const POLICY_CATEGORIES = ['Scheduling', 'Compliance', 'Operations']
+
 export default function Compliances() {
 	const navigate = useNavigate()
 	const { manager, workspace, isLoading, error, reloadWorkspace } = useManagerWorkspace()
@@ -113,7 +115,33 @@ export default function Compliances() {
 		return showAllActivity ? list : list.slice(0, 5)
 	}, [compliance.activity, normalizedSearch, showAllActivity])
 
+	function validatePolicyForm() {
+		if (!policyForm.title.trim()) {
+			return 'Policy title is required.'
+		}
+		if (policyForm.title.trim().length < 4) {
+			return 'Policy title must be at least 4 characters long.'
+		}
+		if (!policyForm.description.trim()) {
+			return 'Policy description is required.'
+		}
+		if (policyForm.description.trim().length < 12) {
+			return 'Policy description must be at least 12 characters long.'
+		}
+		if (!POLICY_CATEGORIES.includes(policyForm.category)) {
+			return 'Choose a valid policy category.'
+		}
+		return ''
+	}
+
 	async function handleCreatePolicy() {
+		const validationMessage = validatePolicyForm()
+		if (validationMessage) {
+			setActionError(validationMessage)
+			setActionMessage('')
+			return
+		}
+
 		try {
 			setCreatingPolicy(true)
 			setActionError('')
@@ -226,9 +254,9 @@ export default function Compliances() {
 									<div className="mt-5 grid gap-4 md:grid-cols-2">
 										<input className="rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm outline-none focus:border-[#0f51ff]" placeholder="Policy title" value={policyForm.title} onChange={(event) => setPolicyForm((current) => ({ ...current, title: event.target.value }))} />
 										<select className="rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm outline-none focus:border-[#0f51ff]" value={policyForm.category} onChange={(event) => setPolicyForm((current) => ({ ...current, category: event.target.value }))}>
-											<option value="Scheduling">Scheduling</option>
-											<option value="Compliance">Compliance</option>
-											<option value="Operations">Operations</option>
+											{POLICY_CATEGORIES.map((category) => (
+												<option key={category} value={category}>{category}</option>
+											))}
 										</select>
 										<textarea className="md:col-span-2 rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm outline-none focus:border-[#0f51ff]" rows="4" placeholder="Policy description" value={policyForm.description} onChange={(event) => setPolicyForm((current) => ({ ...current, description: event.target.value }))} />
 									</div>

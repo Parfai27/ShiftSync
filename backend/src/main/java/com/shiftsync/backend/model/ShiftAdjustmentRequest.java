@@ -30,6 +30,14 @@ public class ShiftAdjustmentRequest extends BaseEntity {
     @JoinColumn(name = "shift_id", nullable = false)
     private Shift shift;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "target_employee_id")
+    private User targetEmployee;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "target_shift_id")
+    private Shift targetShift;
+
     @Column(nullable = false)
     private String adjustmentType;
 
@@ -39,6 +47,13 @@ public class ShiftAdjustmentRequest extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private AdjustmentStatus status;
+
+    @Enumerated(EnumType.STRING)
+    private SwapResponseStatus targetEmployeeResponse;
+
+    private String targetEmployeeNote;
+
+    private LocalDateTime targetRespondedAt;
 
     private LocalDateTime reviewedAt;
 }

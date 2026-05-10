@@ -1,21 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
 	FiBell,
 	FiCalendar,
-	FiChevronDown,
 	FiClock,
 	FiDollarSign,
 	FiGrid,
 	FiLogOut,
 	FiMenu,
-	FiMoon,
 	FiSearch,
 	FiSettings,
 	FiUser,
 } from 'react-icons/fi'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
 import { clearSession, loadSession } from '../../lib/session'
+import EmployeeNotificationBell from '../shared/EmployeeNotificationBell'
+import EmployeeProfileMenu from '../shared/EmployeeProfileMenu'
+import ThemeToggleButton from '../shared/ThemeToggleButton'
 
 const weekDays = [
 	{ day: 'MON', date: '14', active: false },
@@ -36,10 +37,29 @@ const fallbackOverview = {
 	resources: [],
 }
 
+function resolveGreetingLabel() {
+	const hour = new Date().getHours()
+	if (hour < 12) {
+		return 'Good Morning'
+	}
+	if (hour < 18) {
+		return 'Good Afternoon'
+	}
+	return 'Good Evening'
+}
+
 export default function EmployeeOverview() {
+	const navigate = useNavigate()
 	const session = loadSession()
 	const [overview, setOverview] = useState(fallbackOverview)
 	const [error, setError] = useState('')
+	const [searchTerm, setSearchTerm] = useState('')
+	const [scheduleView, setScheduleView] = useState('WEEK')
+	const [actionMessage, setActionMessage] = useState('')
+	const [isRequestingTimeOff, setIsRequestingTimeOff] = useState(false)
+	const [isMessagingManager, setIsMessagingManager] = useState(false)
+	const [isMarkingNotificationsRead, setIsMarkingNotificationsRead] = useState(false)
+	const [timeLabel, setTimeLabel] = useState(resolveGreetingLabel())
 
 	useEffect(() => {
 		let cancelled = false
@@ -69,6 +89,128 @@ export default function EmployeeOverview() {
 		}
 	}, [session?.userId])
 
+	useEffect(() => {
+		const intervalId = window.setInterval(() => {
+			setTimeLabel(resolveGreetingLabel())
+		}, 60000)
+
+		return () => window.clearInterval(intervalId)
+	}, [])
+
+	const normalizedSearch = searchTerm.trim().toLowerCase()
+	const visibleStats = useMemo(() => {
+		return overview.stats.filter((item) => {
+			if (!normalizedSearch) {
+				return true
+			}
+			return [item.label, item.value, item.sub, item.tag].join(' ').toLowerCase().includes(normalizedSearch)
+		})
+	}, [normalizedSearch, overview.stats])
+
+	const visibleSchedule = useMemo(() => {
+		const scopedSchedule = scheduleView === 'MONTH' ? overview.schedule : overview.schedule.slice(0, 3)
+		return scopedSchedule.filter((item) => {
+			if (!normalizedSearch) {
+				return true
+			}
+			return [item.time, item.slot, item.title, item.subtitle, item.meta, item.date].join(' ').toLowerCase().includes(normalizedSearch)
+		})
+	}, [normalizedSearch, overview.schedule, scheduleView])
+
+	const visibleNotifications = useMemo(() => {
+		return overview.notifications.filter((item) => {
+			if (!normalizedSearch) {
+				return true
+			}
+			return [item.title, item.detail, item.when].join(' ').toLowerCase().includes(normalizedSearch)
+		})
+	}, [normalizedSearch, overview.notifications])
+
+	const visibleResources = useMemo(() => {
+		return overview.resources.filter((item) => {
+			if (!normalizedSearch) {
+				return true
+			}
+			return item.name.toLowerCase().includes(normalizedSearch)
+		})
+	}, [normalizedSearch, overview.resources])
+
+	const hasAssignedDashboardData = overview.stats.length > 0 || overview.schedule.length > 0
+
+	async function requestTimeOff() {
+		if (!session?.userId) {
+			setError('No employee session found. Please log in again.')
+			return
+		}
+		try {
+			setError('')
+			setActionMessage('')
+			setIsRequestingTimeOff(true)
+			await apiRequest(`/api/employee/time-off/${session.userId}`, {
+				method: 'POST',
+				body: JSON.stringify({ note: 'Requested from employee overview quick action' }),
+			})
+			setActionMessage('Time-off request sent to your manager successfully.')
+		} catch (requestError) {
+			setError(requestError.message || 'Unable to submit your time-off request.')
+		} finally {
+			setIsRequestingTimeOff(false)
+		}
+	}
+
+	async function messageManager() {
+		await contactManager('Hello manager, I need assistance from the employee dashboard.', 'Your message was delivered to the manager on duty.')
+	}
+
+	async function requestManagerCall() {
+		await contactManager('Hello manager, please call me back when you are available.', 'A call-back request was delivered to the manager on duty.')
+	}
+
+	async function contactManager(message, successText) {
+		if (!session?.userId) {
+			setError('No employee session found. Please log in again.')
+			return
+		}
+		try {
+			setError('')
+			setActionMessage('')
+			setIsMessagingManager(true)
+			await apiRequest(`/api/employee/contact-manager/${session.userId}`, {
+				method: 'POST',
+				body: JSON.stringify({ message }),
+			})
+			setActionMessage(successText)
+		} catch (requestError) {
+			setError(requestError.message || 'Unable to send your message right now.')
+		} finally {
+			setIsMessagingManager(false)
+		}
+	}
+
+	async function markAllNotificationsRead() {
+		if (!session?.userId) {
+			setError('No employee session found. Please log in again.')
+			return
+		}
+		try {
+			setError('')
+			setActionMessage('')
+			setIsMarkingNotificationsRead(true)
+			await apiRequest(`/api/employee/notifications/${session.userId}/mark-all-read`, {
+				method: 'POST',
+			})
+			setOverview((current) => ({
+				...current,
+				notifications: current.notifications.map((item) => ({ ...item, active: false })),
+			}))
+			setActionMessage('All visible notifications were marked as read.')
+		} catch (requestError) {
+			setError(requestError.message || 'Unable to mark notifications as read.')
+		} finally {
+			setIsMarkingNotificationsRead(false)
+		}
+	}
+
 	return (
 		<main className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#eef4ff_0%,#f7f9ff_38%,#eef2ff_100%)] text-slate-900">
 			<div className="flex h-screen w-full overflow-hidden border border-white/80 bg-white/85 backdrop-blur-xl">
@@ -95,7 +237,7 @@ export default function EmployeeOverview() {
 				<div className="dashboard-main-offset flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
 					<header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/75 px-4 py-4 backdrop-blur-xl sm:px-6 xl:px-8">
 						<div className="flex items-center gap-3 xl:hidden">
-							<button className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700"><FiMenu className="h-5 w-5" /></button>
+							<button className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700" onClick={() => navigate('/employee-dashboard')} type="button"><FiMenu className="h-5 w-5" /></button>
 							<div className="flex min-w-0 items-center gap-3">
 								<span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#0f51ff] text-xs font-black text-white">S</span>
 								<div className="min-w-0">
@@ -108,20 +250,13 @@ export default function EmployeeOverview() {
 						<div className="mt-4 flex flex-col gap-4 xl:mt-0 xl:flex-row xl:items-center xl:justify-between">
 							<label className="relative w-full max-w-3xl">
 								<FiSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-								<input type="search" placeholder="Search resources, shifts, or members..." className="h-12 w-full rounded-full border border-slate-200/80 bg-[#f5f7ff] px-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#0f51ff] focus:bg-white" />
+								<input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search resources, shifts, or members..." className="h-12 w-full rounded-full border border-slate-200/80 bg-[#f5f7ff] px-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#0f51ff] focus:bg-white" />
 							</label>
 
 							<div className="flex items-center justify-between gap-3 xl:justify-end">
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiBell className="h-4 w-4" /></button>
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiMoon className="h-4 w-4" /></button>
-								<div className="flex items-center gap-3 rounded-full bg-white px-3 py-2">
-									<div className="text-right leading-tight">
-										<div className="text-sm font-bold text-slate-900">{overview.employeeName}</div>
-										<div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{overview.roleLabel}</div>
-									</div>
-									<div className="h-10 w-10 overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f51ff,#7ea4ff)] ring-2 ring-[#eef3ff]" />
-									<FiChevronDown className="h-4 w-4 text-slate-400" />
-								</div>
+								<EmployeeNotificationBell userId={session?.userId} />
+								<ThemeToggleButton />
+								<EmployeeProfileMenu name={overview.employeeName} profileImageUrl={session?.profileImageUrl} role={overview.roleLabel} />
 							</div>
 						</div>
 					</header>
@@ -130,43 +265,53 @@ export default function EmployeeOverview() {
 						<section className="space-y-5">
 							<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 								<div>
-									<h1 className="text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-4xl">Good Morning, {overview.employeeName}</h1>
-									<p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">Your dashboard is now loading real assignments, payroll, and notifications from the ShiftSync backend.</p>
+									<h1 className="text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-4xl">{timeLabel}, {overview.employeeName}</h1>
 								</div>
 								<div className="flex flex-wrap items-center gap-2">
-									<button className="rounded-xl bg-[#e8eeff] px-5 py-2.5 text-xs font-bold text-[#2542ad] transition hover:bg-[#dbe6ff]">View Full History</button>
-									<button className="rounded-xl bg-[#0f51ff] px-5 py-2.5 text-xs font-bold text-white transition hover:bg-[#0b44de]">Request Time Off</button>
+									<button className="rounded-xl bg-[#e8eeff] px-5 py-2.5 text-xs font-bold text-[#2542ad] transition hover:bg-[#dbe6ff]" onClick={() => navigate('/employee-schedule')} type="button">View Full History</button>
+									<button className="rounded-xl bg-[#0f51ff] px-5 py-2.5 text-xs font-bold text-white transition hover:bg-[#0b44de] disabled:cursor-not-allowed disabled:opacity-60" disabled={isRequestingTimeOff} onClick={requestTimeOff} type="button">{isRequestingTimeOff ? 'Submitting...' : 'Request Time Off'}</button>
 								</div>
 							</div>
 
 							{error ? (
 								<div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div>
 							) : null}
+							{actionMessage ? (
+								<div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{actionMessage}</div>
+							) : null}
 
-							<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-								{overview.stats.map((stat, index) => (
-									<article key={stat.label} className="rounded-2xl border border-slate-200/80 bg-white p-4">
-										<div className="flex items-center justify-between gap-3">
-											<span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] ${index === 0 ? 'bg-blue-50 text-blue-600' : index === 1 ? 'bg-indigo-50 text-indigo-600' : index === 2 ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-700'}`}>{stat.tag}</span>
-											{index === 0 ? <FiClock className="h-4 w-4 text-slate-400" /> : index === 1 ? <FiCalendar className="h-4 w-4 text-slate-400" /> : index === 2 ? <FiDollarSign className="h-4 w-4 text-slate-400" /> : <FiGrid className="h-4 w-4 text-slate-400" />}
-										</div>
-										<div className="mt-4 text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">{stat.label}</div>
-										<div className="mt-2 flex items-end gap-1"><span className="text-3xl font-black tracking-[-0.05em] text-slate-950">{stat.value}</span><span className="pb-1 text-xs font-semibold text-slate-400">{stat.sub}</span></div>
-										<div className="mt-4 h-1.5 w-full rounded-full bg-slate-100">
-											<div className={`h-full rounded-full ${index === 0 ? 'w-[81%] bg-[#0f51ff]' : index === 1 ? 'w-[60%] bg-indigo-500' : index === 2 ? 'w-[74%] bg-rose-500' : 'w-[94%] bg-slate-600'}`} />
-										</div>
-									</article>
-								))}
-							</div>
+							{hasAssignedDashboardData ? (
+								<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+									{visibleStats.map((stat, index) => (
+										<article key={stat.label} className="rounded-2xl border border-slate-200/80 bg-white p-4">
+											<div className="flex items-center justify-between gap-3">
+												<span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] ${index === 0 ? 'bg-blue-50 text-blue-600' : index === 1 ? 'bg-indigo-50 text-indigo-600' : index === 2 ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-700'}`}>{stat.tag}</span>
+												{index === 0 ? <FiClock className="h-4 w-4 text-slate-400" /> : index === 1 ? <FiCalendar className="h-4 w-4 text-slate-400" /> : index === 2 ? <FiDollarSign className="h-4 w-4 text-slate-400" /> : <FiGrid className="h-4 w-4 text-slate-400" />}
+											</div>
+											<div className="mt-4 text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">{stat.label}</div>
+											<div className="mt-2 flex items-end gap-1"><span className="text-3xl font-black tracking-[-0.05em] text-slate-950">{stat.value}</span><span className="pb-1 text-xs font-semibold text-slate-400">{stat.sub}</span></div>
+											<div className="mt-4 h-1.5 w-full rounded-full bg-slate-100">
+												<div className={`h-full rounded-full ${index === 0 ? 'w-[81%] bg-[#0f51ff]' : index === 1 ? 'w-[60%] bg-indigo-500' : index === 2 ? 'w-[74%] bg-rose-500' : 'w-[94%] bg-slate-600'}`} />
+											</div>
+										</article>
+									))}
+									{!visibleStats.length ? <div className="col-span-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-500">No stats matched your search.</div> : null}
+								</div>
+							) : (
+								<div className="rounded-2xl border border-slate-200/80 bg-white px-5 py-6 text-sm text-slate-500">
+									<div className="text-base font-extrabold text-slate-900">No shifts assigned yet</div>
+									<div className="mt-2 max-w-2xl leading-6">Your employee dashboard will populate once your manager assigns your first schedule.</div>
+								</div>
+							)}
 						</section>
 
-						<section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)]">
+						{hasAssignedDashboardData ? <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)]">
 							<article className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5">
 								<div className="flex flex-wrap items-center justify-between gap-3">
 									<h2 className="text-[28px] font-black tracking-[-0.05em] text-slate-950">My Schedule</h2>
 									<div className="inline-flex rounded-xl bg-[#eef2ff] p-1 text-xs font-semibold text-slate-500">
-										<button className="rounded-lg bg-white px-3 py-1.5 text-[#0f51ff]">Week</button>
-										<button className="rounded-lg px-3 py-1.5">Month</button>
+										<button className={`rounded-lg px-3 py-1.5 ${scheduleView === 'WEEK' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setScheduleView('WEEK')} type="button">Week</button>
+										<button className={`rounded-lg px-3 py-1.5 ${scheduleView === 'MONTH' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setScheduleView('MONTH')} type="button">Month</button>
 									</div>
 								</div>
 
@@ -182,7 +327,7 @@ export default function EmployeeOverview() {
 									</div>
 
 									<div className="mt-3 space-y-2.5">
-										{overview.schedule.map((item, index) => (
+										{visibleSchedule.map((item, index) => (
 											<div key={`${item.title}-${item.date}-${index}`} className={`flex flex-wrap items-center gap-3 rounded-2xl border bg-white px-4 py-3 ${index === 0 ? 'border-[#c7d6ff]' : 'border-slate-200/80'}`}>
 												<div className="min-w-15">
 													<div className="text-[30px] leading-none font-black tracking-[-0.05em] text-slate-900">{item.time}</div>
@@ -198,8 +343,9 @@ export default function EmployeeOverview() {
 												</div>
 											</div>
 										))}
+										{!visibleSchedule.length ? <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-500">No schedule items matched your search.</div> : null}
 
-										<button className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-600 transition hover:border-[#0f51ff] hover:text-[#0f51ff]">+ Find Open Shifts</button>
+										<button className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-600 transition hover:border-[#0f51ff] hover:text-[#0f51ff]" onClick={() => navigate('/employee-schedule')} type="button">+ Find Open Shifts</button>
 									</div>
 								</div>
 							</article>
@@ -208,10 +354,10 @@ export default function EmployeeOverview() {
 								<article className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5">
 									<div className="mb-3 flex items-center justify-between gap-3">
 										<h2 className="text-2xl font-black tracking-[-0.05em] text-slate-950">Notifications</h2>
-										<button className="text-xs font-bold text-[#0f51ff]">Mark all read</button>
+										<button className="text-xs font-bold text-[#0f51ff] disabled:cursor-not-allowed disabled:opacity-60" disabled={isMarkingNotificationsRead} onClick={markAllNotificationsRead} type="button">{isMarkingNotificationsRead ? 'Updating...' : 'Mark all read'}</button>
 									</div>
 									<div className="space-y-2.5">
-										{overview.notifications.map((item) => (
+										{visibleNotifications.map((item) => (
 											<div key={`${item.title}-${item.when}`} className="rounded-xl bg-[#f8faff] p-3">
 												<div className="flex items-start gap-3">
 													<span className={`mt-2 h-2 w-2 rounded-full ${item.active ? 'bg-[#0f51ff]' : 'bg-slate-300'}`} />
@@ -223,6 +369,7 @@ export default function EmployeeOverview() {
 												</div>
 											</div>
 										))}
+										{!visibleNotifications.length ? <div className="rounded-xl bg-[#f8faff] p-3 text-sm text-slate-500">No notifications matched your search.</div> : null}
 									</div>
 								</article>
 
@@ -236,21 +383,22 @@ export default function EmployeeOverview() {
 										</div>
 									</div>
 									<div className="mt-4 space-y-2">
-										<button className="w-full rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0f51ff] transition hover:bg-blue-50">Instant Message</button>
-										<button className="w-full rounded-xl bg-[#235ff7] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#1b4ad1]">Direct Call</button>
+										<button className="w-full rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0f51ff] transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60" disabled={isMessagingManager} onClick={messageManager} type="button">{isMessagingManager ? 'Sending...' : 'Instant Message'}</button>
+										<button className="w-full rounded-xl bg-[#235ff7] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#1b4ad1] disabled:cursor-not-allowed disabled:opacity-60" disabled={isMessagingManager} onClick={requestManagerCall} type="button">Direct Call</button>
 									</div>
 								</article>
 
 								<article className="rounded-[20px] bg-[#eef2ff] p-4 sm:p-5">
 									<h3 className="text-[12px] font-extrabold uppercase tracking-[0.18em] text-slate-600">Resources</h3>
 									<div className="mt-3 grid grid-cols-2 gap-2.5">
-										{overview.resources.map((resource) => (
-											<button key={resource.name} className="rounded-xl border border-white/70 bg-white px-3 py-3 text-center text-xs font-bold text-slate-700 transition hover:border-[#0f51ff] hover:text-[#0f51ff]">{resource.name}</button>
+										{visibleResources.map((resource) => (
+											<button key={resource.name} className="rounded-xl border border-white/70 bg-white px-3 py-3 text-center text-xs font-bold text-slate-700 transition hover:border-[#0f51ff] hover:text-[#0f51ff]" onClick={() => navigate('/employee-announcements')} type="button">{resource.name}</button>
 										))}
+										{!visibleResources.length ? <div className="col-span-2 rounded-xl border border-white/70 bg-white px-3 py-3 text-center text-xs font-bold text-slate-500">No resources matched your search.</div> : null}
 									</div>
 								</article>
 							</div>
-						</section>
+						</section> : null}
 					</div>
 				</div>
 			</div>

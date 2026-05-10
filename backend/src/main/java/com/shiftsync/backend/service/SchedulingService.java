@@ -4,6 +4,9 @@ import com.shiftsync.backend.dto.SchedulingDtos.AdjustmentRequestPayload;
 import com.shiftsync.backend.dto.SchedulingDtos.AdjustmentStatusUpdate;
 import com.shiftsync.backend.dto.SchedulingDtos.AvailabilityRequest;
 import com.shiftsync.backend.dto.SchedulingDtos.ManagerSchedulingActionRequest;
+import com.shiftsync.backend.dto.SchedulingDtos.ManualShiftAssignmentRequest;
+import com.shiftsync.backend.dto.SchedulingDtos.ReassignShiftAssignmentRequest;
+import com.shiftsync.backend.dto.SchedulingDtos.RemoveShiftAssignmentRequest;
 import com.shiftsync.backend.dto.SchedulingDtos.ShiftRequest;
 import com.shiftsync.backend.model.AdjustmentStatus;
 import com.shiftsync.backend.model.AuditLog;
@@ -47,9 +50,7 @@ public class SchedulingService {
 
     private static final List<String> REQUIRED_SHIFT_ROLES = List.of(
         "Pharmacist",
-        "Pharmacy Assistant / Attendant",
-        "Store Officer",
-        "Cashier"
+        "Pharmacy Assistant / Attendant"
     );
 
     private final ShiftRepository shiftRepository;
@@ -135,8 +136,9 @@ public class SchedulingService {
         User manager = getManager(request.managerId());
         Branch branch = manager.getBranch();
         List<Shift> existingShifts = shiftRepository.findByBranchId(branch.getId());
-        LocalDate weekStart = resolveNextScheduleWeekStart(existingShifts);
-        List<Shift> createdShifts = new ArrayList<>();
+        LocalDate weekStart = resolveVisibleScheduleWeekStart(existingShifts);
+        List<Shift> weekShifts = new ArrayList<>();
+        int createdCount = 0;
 
         for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
             LocalDate shiftDate = weekStart.plusDays(dayOffset);
@@ -148,6 +150,7 @@ public class SchedulingService {
                     .orElse(null);
 
                 if (existingShift != null) {
+                    weekShifts.add(existingShift);
                     continue;
                 }
 
@@ -161,21 +164,32 @@ public class SchedulingService {
                     .assignedStaff(0)
                     .status(ShiftStatus.UNDERSTAFFED)
                     .build();
-                createdShifts.add(shiftRepository.save(shift));
+                Shift savedShift = shiftRepository.save(shift);
+                weekShifts.add(savedShift);
+                createdCount++;
             }
         }
 
-        if (createdShifts.isEmpty()) {
-            throw new IllegalArgumentException("Weekly shifts already exist for the next schedule window");
+        for (Shift shift : weekShifts) {
+            List<ShiftAssignment> existingAssignments = shiftAssignmentRepository.findByShiftId(shift.getId());
+            if (!existingAssignments.isEmpty()) {
+                shiftAssignmentRepository.deleteAll(existingAssignments);
+            }
+            shift.setAssignedStaff(0);
+            shift.setStatus(ShiftStatus.UNDERSTAFFED);
+            shiftRepository.save(shift);
         }
 
         logAudit(
             manager,
-            "Created weekly shifts",
+            "Reset weekly shifts",
             "Scheduling",
-            "Created " + createdShifts.size() + " shifts for the week starting " + weekStart + "."
+            "Prepared an empty weekly schedule for " + weekStart + " with " + weekShifts.size() + " shifts. " +
+                (createdCount > 0 ? ("Created " + createdCount + " missing shift slot(s) and cleared all assignments.") : "Cleared all existing assignments.")
         );
-        return createdShifts.get(0);
+        return weekShifts.stream()
+            .min(Comparator.comparing(Shift::getShiftDate).thenComparing(Shift::getStartTime))
+            .orElseThrow(() -> new IllegalArgumentException("Unable to prepare the weekly schedule"));
     }
 
     @Transactional
@@ -214,6 +228,145 @@ public class SchedulingService {
 
         logAudit(manager, "Ran auto schedule", "Scheduling", "Auto scheduling processed " + openShifts.size() + " shift(s).");
         return openShifts;
+    }
+
+    @Transactional
+    public Shift assignShiftToEmployee(ManualShiftAssignmentRequest request) {
+        User manager = getManager(request.managerId());
+        User employee = userRepository.findById(request.employeeId())
+            .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
+
+        validateManagedEmployee(manager, employee);
+        Shift shift = findManagedShift(manager, request.shiftDate(), request.shiftName());
+
+        if (isEmployeeAssignedToShift(employee.getId(), shift.getId())) {
+            throw new IllegalArgumentException("Employee is already assigned to this shift");
+        }
+        if (hasSameDayAssignment(employee.getId(), shift.getShiftDate())) {
+            throw new IllegalArgumentException("Employee already has a shift on this day");
+        }
+
+        String employeeRole = resolveShiftRole(employee);
+        if (employeeRole == null || !REQUIRED_SHIFT_ROLES.contains(employeeRole)) {
+            throw new IllegalArgumentException("Employee role is not eligible for this shift model");
+        }
+
+        String missingRole = findMissingRole(shiftAssignmentRepository.findByShiftId(shift.getId()));
+        if (missingRole == null) {
+            throw new IllegalArgumentException("This shift is already fully assigned");
+        }
+        if (!missingRole.equals(employeeRole)) {
+            throw new IllegalArgumentException("This shift needs a " + missingRole + ", not " + employeeRole);
+        }
+
+        assignEmployeeToShift(manager, employee, shift, "Assigned employee manually to selected shift");
+        return shiftRepository.save(shift);
+    }
+
+    @Transactional
+    public Shift removeShiftAssignment(RemoveShiftAssignmentRequest request) {
+        User manager = getManager(request.managerId());
+        User employee = userRepository.findById(request.employeeId())
+            .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
+        validateManagedEmployee(manager, employee);
+
+        Shift shift = findManagedShift(manager, request.shiftDate(), request.shiftName());
+        ShiftAssignment assignment = shiftAssignmentRepository.findByShiftId(shift.getId()).stream()
+            .filter(item -> item.getEmployee().getId().equals(employee.getId()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("This employee is not assigned to the selected shift"));
+
+        shiftAssignmentRepository.delete(assignment);
+        shift.setAssignedStaff(Math.max(0, shift.getAssignedStaff() - 1));
+        updateShiftStaffingStatus(shift);
+        shiftRepository.save(shift);
+
+        notificationRepository.save(
+            Notification.builder()
+                .title("Shift assignment removed")
+                .message("You were removed from " + shift.getName() + " on " + shift.getShiftDate() + " by " + manager.getFullName() + ".")
+                .priority(NotificationPriority.HIGH)
+                .recipient(employee)
+                .read(false)
+                .build()
+        );
+
+        logAudit(
+            manager,
+            "Removed employee from shift",
+            "Scheduling",
+            employee.getFullName() + " removed from " + shift.getName() + " on " + shift.getShiftDate() + "."
+        );
+        return shift;
+    }
+
+    @Transactional
+    public Shift reassignShift(ReassignShiftAssignmentRequest request) {
+        User manager = getManager(request.managerId());
+        User currentEmployee = userRepository.findById(request.currentEmployeeId())
+            .orElseThrow(() -> new IllegalArgumentException("Current employee not found"));
+        User replacementEmployee = userRepository.findById(request.replacementEmployeeId())
+            .orElseThrow(() -> new IllegalArgumentException("Replacement employee not found"));
+
+        validateManagedEmployee(manager, currentEmployee);
+        validateManagedEmployee(manager, replacementEmployee);
+
+        if (currentEmployee.getId().equals(replacementEmployee.getId())) {
+            throw new IllegalArgumentException("Choose a different employee to reassign this shift");
+        }
+
+        Shift shift = findManagedShift(manager, request.shiftDate(), request.shiftName());
+        ShiftAssignment currentAssignment = shiftAssignmentRepository.findByShiftId(shift.getId()).stream()
+            .filter(item -> item.getEmployee().getId().equals(currentEmployee.getId()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("The selected assignment could not be found"));
+
+        if (hasSameDayAssignment(replacementEmployee.getId(), shift.getShiftDate())) {
+            throw new IllegalArgumentException("Replacement employee already has a shift on this day");
+        }
+
+        String currentRole = resolveShiftRole(currentEmployee);
+        String replacementRole = resolveShiftRole(replacementEmployee);
+        if (currentRole == null || replacementRole == null || !currentRole.equals(replacementRole)) {
+            throw new IllegalArgumentException("Replacement employee must have the same role as the current assignment");
+        }
+
+        if (isEmployeeAssignedToShift(replacementEmployee.getId(), shift.getId())) {
+            throw new IllegalArgumentException("Replacement employee is already assigned to this shift");
+        }
+
+        currentAssignment.setEmployee(replacementEmployee);
+        currentAssignment.setAssignedAt(LocalDateTime.now());
+        shiftAssignmentRepository.save(currentAssignment);
+        updateShiftStaffingStatus(shift);
+        shiftRepository.save(shift);
+
+        notificationRepository.save(
+            Notification.builder()
+                .title("Shift reassigned")
+                .message("You were removed from " + shift.getName() + " on " + shift.getShiftDate() + " by " + manager.getFullName() + ".")
+                .priority(NotificationPriority.HIGH)
+                .recipient(currentEmployee)
+                .read(false)
+                .build()
+        );
+        notificationRepository.save(
+            Notification.builder()
+                .title("New shift assignment")
+                .message("You have been scheduled for " + shift.getName() + " on " + shift.getShiftDate() + " (" + shift.getStartTime() + "-" + shift.getEndTime() + ").")
+                .priority(NotificationPriority.MEDIUM)
+                .recipient(replacementEmployee)
+                .read(false)
+                .build()
+        );
+
+        logAudit(
+            manager,
+            "Reassigned shift",
+            "Scheduling",
+            "Moved " + shift.getName() + " on " + shift.getShiftDate() + " from " + currentEmployee.getFullName() + " to " + replacementEmployee.getFullName() + "."
+        );
+        return shift;
     }
 
     private User getManager(Long managerId) {
@@ -270,6 +423,21 @@ public class SchedulingService {
             .anyMatch(existingShift -> existingShift.getShiftDate().equals(shiftDate));
     }
 
+    private Shift findManagedShift(User manager, LocalDate shiftDate, String shiftName) {
+        return shiftRepository.findByBranchId(manager.getBranch().getId()).stream()
+            .filter(candidate -> candidate.getShiftDate().equals(shiftDate))
+            .filter(candidate -> candidate.getName().equals(shiftName))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Selected shift was not found"));
+    }
+
+    private void validateManagedEmployee(User manager, User employee) {
+        if (employee.getRole() != Role.EMPLOYEE || employee.getBranch() == null || manager.getBranch() == null ||
+            !employee.getBranch().getId().equals(manager.getBranch().getId())) {
+            throw new IllegalArgumentException("Selected employee does not belong to this pharmacy team");
+        }
+    }
+
     private boolean isActuallyAvailable(Long employeeId, Shift shift, List<Availability> dayAvailability) {
         return dayAvailability.stream()
             .filter(item -> item.getEmployee().getId().equals(employeeId))
@@ -289,11 +457,7 @@ public class SchedulingService {
         shiftAssignmentRepository.save(assignment);
 
         shift.setAssignedStaff(shift.getAssignedStaff() + 1);
-        if (shift.getAssignedStaff() >= shift.getRequiredStaff()) {
-            shift.setStatus(ShiftStatus.FULL);
-        } else {
-            shift.setStatus(ShiftStatus.PARTIALLY_STAFFED);
-        }
+        updateShiftStaffingStatus(shift);
 
         notificationRepository.save(
             Notification.builder()
@@ -333,6 +497,18 @@ public class SchedulingService {
             .orElse(null);
     }
 
+    private void updateShiftStaffingStatus(Shift shift) {
+        if (shift.getAssignedStaff() <= 0) {
+            shift.setStatus(ShiftStatus.UNDERSTAFFED);
+            return;
+        }
+        if (shift.getAssignedStaff() >= shift.getRequiredStaff()) {
+            shift.setStatus(ShiftStatus.FULL);
+            return;
+        }
+        shift.setStatus(ShiftStatus.PARTIALLY_STAFFED);
+    }
+
     private String resolveShiftRole(User employee) {
         EmployeeProfile profile = employeeProfileRepository.findByUserId(employee.getId()).orElse(null);
         if (profile == null || profile.getJobTitle() == null) {
@@ -346,12 +522,6 @@ public class SchedulingService {
         if (normalized.contains("assistant") || normalized.contains("attendant") || normalized.contains("technician")) {
             return "Pharmacy Assistant / Attendant";
         }
-        if (normalized.contains("store") || normalized.contains("inventory")) {
-            return "Store Officer";
-        }
-        if (normalized.contains("cashier") || normalized.contains("front desk")) {
-            return "Cashier";
-        }
         return null;
     }
 
@@ -363,6 +533,16 @@ public class SchedulingService {
             .orElse(today);
         LocalDate referenceDate = latestShiftDate.isAfter(today) ? latestShiftDate.plusDays(1) : today.plusWeeks(1);
         return referenceDate.with(TemporalAdjusters.nextOrSame(java.time.DayOfWeek.MONDAY));
+    }
+
+    private LocalDate resolveVisibleScheduleWeekStart(List<Shift> existingShifts) {
+        LocalDate today = LocalDate.now();
+        return existingShifts.stream()
+            .filter(shift -> !shift.getShiftDate().isBefore(today))
+            .filter(shift -> getWeeklyTemplates().stream().anyMatch(template -> template.name().equals(shift.getName())))
+            .map(Shift::getShiftDate)
+            .min(LocalDate::compareTo)
+            .orElseGet(() -> resolveNextScheduleWeekStart(existingShifts));
     }
 
     private List<ShiftTemplate> getWeeklyTemplates() {

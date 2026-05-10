@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import Overview from './components/Dashboard/overview.jsx'
 import Profiles from './components/Dashboard/profiles.jsx'
 import Scheduling from './components/Dashboard/scheduling.jsx'
@@ -22,6 +22,17 @@ import EmployeeNotifications from './components/Employee/notifications.jsx'
 import PersonalSettings from './components/Employee/personal_settings.jsx'
 import Landing from './pages/landing.jsx'
 import SessionManager from './components/shared/SessionManager.jsx'
+import { loadSession } from './lib/session'
+
+function EmployeePasswordGate() {
+  const session = loadSession()
+
+  if (session?.role === 'EMPLOYEE' && session?.mustChangePassword) {
+    return <Navigate to="/employee-settings" replace state={{ firstLogin: true, message: 'Please change your temporary password before continuing.' }} />
+  }
+
+  return <Outlet />
+}
 
 function App() {
  
@@ -37,12 +48,14 @@ function App() {
         <Route path="/admin-auditlogs" element={<AuditLogs />} />
         <Route path="/admin-api" element={<ApiIntegrations />} />
         <Route path="/admin-settings" element={<AdminSettings />} />
-        <Route path="/employee-dashboard" element={<EmployeeOverview />} />
-        <Route path="/employee-schedule" element={<MySchedule />} />
-        <Route path="/employee-announcements" element={<Announcements />} />
-        <Route path="/employee-earnings" element={<EarningsAndPays />} />
-        <Route path="/employee-profile" element={<Profile />} />
-        <Route path="/employee-notifications" element={<EmployeeNotifications />} />
+        <Route element={<EmployeePasswordGate />}>
+          <Route path="/employee-dashboard" element={<EmployeeOverview />} />
+          <Route path="/employee-schedule" element={<MySchedule />} />
+          <Route path="/employee-announcements" element={<Announcements />} />
+          <Route path="/employee-earnings" element={<EarningsAndPays />} />
+          <Route path="/employee-profile" element={<Profile />} />
+          <Route path="/employee-notifications" element={<EmployeeNotifications />} />
+        </Route>
         <Route path="/employee-settings" element={<PersonalSettings />} />
         <Route path="/overview" element={<Overview />} />
         <Route path="/profiles" element={<Profiles />} />

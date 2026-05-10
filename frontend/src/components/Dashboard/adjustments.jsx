@@ -33,6 +33,19 @@ function MetricCard({ label, value }) {
 	)
 }
 
+function peerResponseBadgeClasses(value) {
+	if (value.includes('PEER RESPONSE: ACCEPTED')) {
+		return 'bg-[#e8eeff] text-[#0f51ff]'
+	}
+	if (value.includes('PEER RESPONSE: REJECTED')) {
+		return 'bg-rose-100 text-rose-700'
+	}
+	if (value.includes('PEER RESPONSE: PENDING')) {
+		return 'bg-amber-100 text-amber-700'
+	}
+	return 'bg-slate-100 text-slate-600'
+}
+
 export default function Adjustments() {
 	const navigate = useNavigate()
 	const { manager, workspace, isLoading, error, reloadWorkspace } = useManagerWorkspace()
@@ -45,10 +58,26 @@ export default function Adjustments() {
 	const [searchTerm, setSearchTerm] = useState('')
 	const [bulkBusy, setBulkBusy] = useState(false)
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+	const [swapTriageFilter, setSwapTriageFilter] = useState('ALL')
 
 	const normalizedSearch = searchTerm.trim().toLowerCase()
+	const waitingOnPeerCount = adjustments.requests.filter((request) => request.requested.toLowerCase().includes('shift swap') && request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')).length
+	const readyForManagerCount = adjustments.requests.filter((request) => request.requested.toLowerCase().includes('shift swap') && request.toShift.toUpperCase().includes('PEER RESPONSE: ACCEPTED')).length
 	const visibleRequests = useMemo(() => {
 		return adjustments.requests.filter((request) => {
+			const isSwapRequest = request.requested.toLowerCase().includes('shift swap')
+			const isWaitingOnPeer = isSwapRequest && request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')
+			const isReadyForManager = isSwapRequest && request.toShift.toUpperCase().includes('PEER RESPONSE: ACCEPTED')
+
+			const matchesSwapTriage =
+				swapTriageFilter === 'ALL' ||
+				(swapTriageFilter === 'WAITING_PEER' && isWaitingOnPeer) ||
+				(swapTriageFilter === 'READY_MANAGER' && isReadyForManager)
+
+			if (!matchesSwapTriage) {
+				return false
+			}
+
 			if (!normalizedSearch) {
 				return true
 			}
@@ -67,9 +96,10 @@ export default function Adjustments() {
 				.toLowerCase()
 				.includes(normalizedSearch)
 		})
-	}, [adjustments.requests, normalizedSearch])
+	}, [adjustments.requests, normalizedSearch, swapTriageFilter])
 
 	const pendingVisibleRequests = visibleRequests.filter((request) => request.status === 'PENDING')
+	const bulkApprovableRequests = pendingVisibleRequests.filter((request) => !request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING'))
 
 	async function handleDecision(requestId, status) {
 		try {
@@ -94,7 +124,7 @@ export default function Adjustments() {
 	}
 
 	async function handleBulkApprove() {
-		if (!pendingVisibleRequests.length) {
+		if (!bulkApprovableRequests.length) {
 			setActionError('There are no pending adjustment requests to approve.')
 			return
 		}
@@ -104,7 +134,7 @@ export default function Adjustments() {
 			setActionError('')
 			setActionMessage('')
 
-			for (const request of pendingVisibleRequests) {
+			for (const request of bulkApprovableRequests) {
 				await apiRequest(`/api/manager/adjustments/${request.id}`, {
 					method: 'PATCH',
 					body: JSON.stringify({
@@ -116,7 +146,12 @@ export default function Adjustments() {
 			}
 
 			await reloadWorkspace()
-			setActionMessage(`Approved ${pendingVisibleRequests.length} pending adjustment request${pendingVisibleRequests.length === 1 ? '' : 's'}.`)
+			const skippedCount = pendingVisibleRequests.length - bulkApprovableRequests.length
+			setActionMessage(
+				`Approved ${bulkApprovableRequests.length} pending adjustment request${bulkApprovableRequests.length === 1 ? '' : 's'}.${
+					skippedCount > 0 ? ` Skipped ${skippedCount} swap request${skippedCount === 1 ? '' : 's'} still waiting on peer response.` : ''
+				}`
+			)
 		} catch (requestError) {
 			setActionError(requestError.message || 'Unable to bulk approve the selected requests.')
 		} finally {
@@ -212,12 +247,23 @@ export default function Adjustments() {
 									<h1 className="text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-4xl">Shift Adjustments</h1>
 									<p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">{adjustments.summary || 'Loading adjustment requests...'}</p>
 								</div>
-								<button className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-[#0f51ff] disabled:cursor-not-allowed disabled:opacity-60" disabled={bulkBusy || !pendingVisibleRequests.length} onClick={handleBulkApprove} type="button">{bulkBusy ? 'Approving...' : 'Bulk Approve'}</button>
+								<button className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-[#0f51ff] disabled:cursor-not-allowed disabled:opacity-60" disabled={bulkBusy || !bulkApprovableRequests.length} onClick={handleBulkApprove} type="button">{bulkBusy ? 'Approving...' : 'Bulk Approve'}</button>
 							</div>
 
 							{error ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div> : null}
 							{actionError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{actionError}</div> : null}
 							{actionMessage ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{actionMessage}</div> : null}
+							<div className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+								<div>
+									<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Swap Triage</div>
+									<div className="mt-1 text-sm text-slate-600">Use these chips to focus only on swap requests that are still waiting on a teammate or already ready for your approval.</div>
+								</div>
+								<div className="inline-flex flex-wrap gap-2 rounded-2xl bg-[#eef2ff] p-1">
+									<button className={`rounded-xl px-4 py-2 text-sm font-bold ${swapTriageFilter === 'ALL' ? 'bg-white text-[#0f51ff]' : 'text-slate-600'}`} onClick={() => setSwapTriageFilter('ALL')} type="button">All Requests</button>
+									<button className={`rounded-xl px-4 py-2 text-sm font-bold ${swapTriageFilter === 'WAITING_PEER' ? 'bg-white text-[#0f51ff]' : 'text-slate-600'}`} onClick={() => setSwapTriageFilter('WAITING_PEER')} type="button">Waiting on peer response ({waitingOnPeerCount})</button>
+									<button className={`rounded-xl px-4 py-2 text-sm font-bold ${swapTriageFilter === 'READY_MANAGER' ? 'bg-white text-[#0f51ff]' : 'text-slate-600'}`} onClick={() => setSwapTriageFilter('READY_MANAGER')} type="button">Ready for manager decision ({readyForManagerCount})</button>
+								</div>
+							</div>
 
 							<div className="grid gap-5 xl:grid-cols-[1fr_320px]">
 								<div className="space-y-5">
@@ -234,6 +280,17 @@ export default function Adjustments() {
 														<div>
 															<div className="text-xl font-black tracking-[-0.04em] text-slate-950">{request.name}</div>
 															<div className="text-sm text-slate-500">{request.requested}</div>
+															{request.requested.toLowerCase().includes('shift swap') ? (
+																<div className={`mt-2 inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] ${peerResponseBadgeClasses(request.toShift.toUpperCase())}`}>
+																	{request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')
+																		? 'Waiting on peer response'
+																		: request.toShift.toUpperCase().includes('PEER RESPONSE: ACCEPTED')
+																			? 'Peer approved'
+																			: request.toShift.toUpperCase().includes('PEER RESPONSE: REJECTED')
+																				? 'Peer rejected'
+																			: 'Peer response recorded'}
+																</div>
+															) : null}
 														</div>
 													</div>
 
@@ -265,7 +322,7 @@ export default function Adjustments() {
 														</label>
 														<div className="flex gap-3 sm:flex-col">
 															<button
-																disabled={activeRequestId === request.id || request.status !== 'PENDING'}
+																disabled={activeRequestId === request.id || request.status !== 'PENDING' || request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')}
 																onClick={() => handleDecision(request.id, 'APPROVED')}
 																className="rounded-xl bg-[#0f51ff] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#0b44de] disabled:cursor-not-allowed disabled:opacity-60"
 																type="button"

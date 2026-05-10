@@ -83,7 +83,7 @@ function buildTrendSeries(attendanceBars, weekLabels, period) {
 	}))
 }
 
-function buildTrendPath(series, width = 560, height = 240) {
+function buildTrendPath(series, width = 560, height = 260) {
 	if (!series.length) {
 		return ''
 	}
@@ -97,6 +97,10 @@ function buildTrendPath(series, width = 560, height = 240) {
 			return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
 		})
 		.join(' ')
+}
+
+function clampPercent(value) {
+	return Math.max(0, Math.min(100, value || 0))
 }
 
 export default function Reports() {
@@ -136,6 +140,28 @@ export default function Reports() {
 		() => buildTrendSeries(reports.attendanceBars, reports.weekLabels, period),
 		[period, reports.attendanceBars, reports.weekLabels]
 	)
+	const trendSummary = useMemo(() => {
+		if (!trendSeries.length) {
+			return {
+				average: 0,
+				best: null,
+				lowest: null,
+				delta: 0,
+			}
+		}
+
+		const average = Math.round(trendSeries.reduce((sum, item) => sum + item.value, 0) / trendSeries.length)
+		const best = trendSeries.reduce((current, item) => (item.value > current.value ? item : current), trendSeries[0])
+		const lowest = trendSeries.reduce((current, item) => (item.value < current.value ? item : current), trendSeries[0])
+		const delta = trendSeries.length > 1 ? trendSeries[trendSeries.length - 1].value - trendSeries[0].value : 0
+
+		return {
+			average,
+			best,
+			lowest,
+			delta,
+		}
+	}, [trendSeries])
 
 	const filteredDistribution = useMemo(() => {
 		return reports.distribution.filter((item) => {
@@ -328,8 +354,27 @@ export default function Reports() {
 										</p>
 									</div>
 									<div className="mt-6 rounded-[22px] bg-[#f8faff] p-4 sm:p-5">
+										<div className="mb-4 grid gap-3 md:grid-cols-3">
+											<div className="rounded-2xl bg-white px-4 py-4">
+												<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Average Coverage</div>
+												<div className="mt-2 text-3xl font-black tracking-[-0.06em] text-slate-950">{trendSummary.average}%</div>
+												<div className="mt-1 text-xs font-semibold text-slate-500">Across the selected reporting window</div>
+											</div>
+											<div className="rounded-2xl bg-white px-4 py-4">
+												<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Best Period</div>
+												<div className="mt-2 text-3xl font-black tracking-[-0.06em] text-emerald-600">{trendSummary.best?.value ?? 0}%</div>
+												<div className="mt-1 text-xs font-semibold text-slate-500">{trendSummary.best?.label || 'No data'}</div>
+											</div>
+											<div className="rounded-2xl bg-white px-4 py-4">
+												<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Trend Direction</div>
+												<div className={`mt-2 text-3xl font-black tracking-[-0.06em] ${trendSummary.delta >= 0 ? 'text-[#0f51ff]' : 'text-rose-600'}`}>
+													{trendSummary.delta >= 0 ? '+' : ''}{trendSummary.delta}%
+												</div>
+												<div className="mt-1 text-xs font-semibold text-slate-500">Change from first to latest point</div>
+											</div>
+										</div>
 										<div className="grid grid-cols-[42px_minmax(0,1fr)] gap-4">
-											<div className="flex h-72 flex-col justify-between pb-8 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+											<div className="flex h-80 flex-col justify-between pb-10 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
 												<span>100</span>
 												<span>75</span>
 												<span>50</span>
@@ -337,32 +382,68 @@ export default function Reports() {
 												<span>0</span>
 											</div>
 											<div className="relative">
-												<svg className="h-72 w-full" viewBox="0 0 560 240" preserveAspectRatio="none">
+												<svg className="h-80 w-full" viewBox="0 0 560 260" preserveAspectRatio="none">
 													<line x1="0" y1="0" x2="560" y2="0" stroke="#dbe4ff" strokeDasharray="4 4" />
-													<line x1="0" y1="60" x2="560" y2="60" stroke="#e5e7eb" />
-													<line x1="0" y1="120" x2="560" y2="120" stroke="#e5e7eb" />
-													<line x1="0" y1="180" x2="560" y2="180" stroke="#e5e7eb" />
-													<line x1="0" y1="240" x2="560" y2="240" stroke="#e5e7eb" />
-													<path d={`${buildTrendPath(trendSeries, 560, 240)} L 560 240 L 0 240 Z`} fill="rgba(15,81,255,0.10)" />
-													<path d={buildTrendPath(trendSeries, 560, 240)} fill="none" stroke="#0f51ff" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
+													<line x1="0" y1="65" x2="560" y2="65" stroke="#e5e7eb" />
+													<line x1="0" y1="130" x2="560" y2="130" stroke="#e5e7eb" />
+													<line x1="0" y1="195" x2="560" y2="195" stroke="#e5e7eb" />
+													<line x1="0" y1="260" x2="560" y2="260" stroke="#e5e7eb" />
+													<line x1="0" y1="26" x2="560" y2="26" stroke="#10b981" strokeDasharray="6 6" />
+													{trendSeries.map((item, index) => {
+														const step = trendSeries.length > 1 ? 560 / (trendSeries.length - 1) : 560
+														const x = trendSeries.length > 1 ? step * index : 280
+														const barWidth = Math.min(44, Math.max(28, step * 0.45))
+														const height = (clampPercent(item.value) / 100) * 260
+														const y = 260 - height
+														return (
+															<rect
+																key={`${item.label}-bar`}
+																x={x - barWidth / 2}
+																y={y}
+																width={barWidth}
+																height={height}
+																rx="12"
+																fill={item.value >= 90 ? 'rgba(16,185,129,0.18)' : item.value >= 75 ? 'rgba(15,81,255,0.18)' : 'rgba(244,63,94,0.18)'}
+															/>
+														)
+													})}
+													<path d={`${buildTrendPath(trendSeries, 560, 260)} L 560 260 L 0 260 Z`} fill="rgba(15,81,255,0.10)" />
+													<path d={buildTrendPath(trendSeries, 560, 260)} fill="none" stroke="#0f51ff" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
 													{trendSeries.map((item, index) => {
 														const x = trendSeries.length > 1 ? (560 / (trendSeries.length - 1)) * index : 280
-														const y = 240 - (Math.max(0, Math.min(100, item.value)) / 100) * 240
+														const y = 260 - (clampPercent(item.value) / 100) * 260
 														return (
 															<g key={item.label}>
 																<circle cx={x} cy={y} r="6" fill="#0f51ff" />
 																<circle cx={x} cy={y} r="12" fill="rgba(15,81,255,0.12)" />
+																<text x={x} y={Math.max(16, y - 14)} textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="800">
+																	{item.value}%
+																</text>
 															</g>
 														)
 													})}
 												</svg>
+												<div className="mb-3 flex flex-wrap items-center gap-3 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+													<div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#0f51ff]" /> Coverage trend</div>
+													<div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> 90% target</div>
+													<div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-400" /> At-risk periods</div>
+												</div>
 												<div className="mt-3 grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(trendSeries.length, 1)}, minmax(0, 1fr))` }}>
 													{trendSeries.map((item) => (
 														<div key={item.label} className="text-center">
-															<div className="text-sm font-black text-slate-900">{item.value}%</div>
+															<div className={`text-sm font-black ${item.value >= 90 ? 'text-emerald-600' : item.value >= 75 ? 'text-slate-900' : 'text-rose-600'}`}>{item.value}%</div>
 															<div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-500">{item.label}</div>
 														</div>
 													))}
+												</div>
+												<div className="mt-4 grid gap-3 md:grid-cols-2">
+													<div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-600">
+														<span className="font-bold text-slate-900">Lowest coverage:</span>{' '}
+														{trendSummary.lowest ? `${trendSummary.lowest.label} at ${trendSummary.lowest.value}%` : 'No data'}
+													</div>
+													<div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-600">
+														<span className="font-bold text-slate-900">Target:</span> Keep coverage at or above 90% for a stable weekly rota.
+													</div>
 												</div>
 											</div>
 										</div>

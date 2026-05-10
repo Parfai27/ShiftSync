@@ -47,4 +47,8 @@ public class User extends BaseEntity {
 
     @Column(nullable = false)
     private boolean active;
+
+    @Builder.Default
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean mustChangePassword = false;
 }

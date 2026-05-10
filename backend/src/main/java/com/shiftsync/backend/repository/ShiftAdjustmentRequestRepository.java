@@ -8,4 +8,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ShiftAdjustmentRequestRepository extends JpaRepository<ShiftAdjustmentRequest, Long> {
     List<ShiftAdjustmentRequest> findByStatus(AdjustmentStatus status);
     List<ShiftAdjustmentRequest> findByEmployeeId(Long employeeId);
+    List<ShiftAdjustmentRequest> findByTargetEmployeeId(Long targetEmployeeId);
 }

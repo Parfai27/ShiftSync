@@ -7,7 +7,7 @@ public final class DashboardDtos {
     private DashboardDtos() {
     }
 
-    public record MetricCard(String title, String value, String delta) {
+    public record MetricCard(String title, String value, String delta, String note) {
     }
 
     public record ShiftStatusCard(String name, String time, String fill, String status, String dayLabel) {

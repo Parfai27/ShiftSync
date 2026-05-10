@@ -4,6 +4,9 @@ import com.shiftsync.backend.dto.SchedulingDtos.AdjustmentRequestPayload;
 import com.shiftsync.backend.dto.SchedulingDtos.AdjustmentStatusUpdate;
 import com.shiftsync.backend.dto.SchedulingDtos.AvailabilityRequest;
 import com.shiftsync.backend.dto.SchedulingDtos.ManagerSchedulingActionRequest;
+import com.shiftsync.backend.dto.SchedulingDtos.ManualShiftAssignmentRequest;
+import com.shiftsync.backend.dto.SchedulingDtos.ReassignShiftAssignmentRequest;
+import com.shiftsync.backend.dto.SchedulingDtos.RemoveShiftAssignmentRequest;
 import com.shiftsync.backend.dto.SchedulingDtos.ShiftRequest;
 import com.shiftsync.backend.model.Availability;
 import com.shiftsync.backend.model.Shift;
@@ -49,6 +52,24 @@ public class SchedulingController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void assignAvailableEmployee(@Valid @RequestBody ManagerSchedulingActionRequest request) {
         schedulingService.assignAvailableEmployee(request);
+    }
+
+    @PostMapping("/manager/assign-shift")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void assignShiftToEmployee(@Valid @RequestBody ManualShiftAssignmentRequest request) {
+        schedulingService.assignShiftToEmployee(request);
+    }
+
+    @PostMapping("/manager/remove-shift-assignment")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeShiftAssignment(@Valid @RequestBody RemoveShiftAssignmentRequest request) {
+        schedulingService.removeShiftAssignment(request);
+    }
+
+    @PostMapping("/manager/reassign-shift")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void reassignShift(@Valid @RequestBody ReassignShiftAssignmentRequest request) {
+        schedulingService.reassignShift(request);
     }
 
     @PostMapping("/manager/auto-schedule")

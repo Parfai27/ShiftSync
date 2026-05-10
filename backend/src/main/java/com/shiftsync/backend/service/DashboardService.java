@@ -64,15 +64,18 @@ public class DashboardService {
         int assignedStaff = branchShifts.stream().mapToInt(Shift::getAssignedStaff).sum();
         int coverage = requiredStaff == 0 ? 0 : (int) Math.round((assignedStaff * 100.0) / requiredStaff);
         long understaffedCount = branchShifts.stream().filter(shift -> shift.getAssignedStaff() < shift.getRequiredStaff()).count();
+        long fullShifts = branchShifts.stream().filter(shift -> shift.getAssignedStaff() >= shift.getRequiredStaff()).count();
+        long partialShifts = branchShifts.stream().filter(shift -> shift.getAssignedStaff() > 0 && shift.getAssignedStaff() < shift.getRequiredStaff()).count();
+        long openShifts = branchShifts.stream().filter(shift -> shift.getAssignedStaff() == 0).count();
         long unreadNotifications = notificationRepository.findByRecipientIdOrderByCreatedAtDesc(managerId).stream()
             .filter(item -> !item.isRead())
             .count();
 
         List<MetricCard> metrics = List.of(
-            new MetricCard("Total Employees", String.valueOf(branchEmployees.size()), branchEmployees.isEmpty() ? "No staff" : "Active"),
-            new MetricCard("Active Shifts", String.valueOf(branchShifts.size()), branchShifts.isEmpty() ? "No shifts" : "LIVE"),
-            new MetricCard("Coverage %", coverage + "%", coverage >= 90 ? "Optimal" : "Review"),
-            new MetricCard("Pending Adjustments", String.valueOf(pendingAdjustments), pendingAdjustments > 0 ? "Review" : "Clear")
+            new MetricCard("Total Employees", String.valueOf(branchEmployees.size()), branchEmployees.isEmpty() ? "No staff" : "Active", branchEmployees.size() + " active team members in the pharmacy"),
+            new MetricCard("Scheduled Shifts", String.valueOf(branchShifts.size()), branchShifts.isEmpty() ? "No shifts" : "This Window", fullShifts + " covered • " + partialShifts + " partial • " + openShifts + " open"),
+            new MetricCard("Staffing Coverage", coverage + "%", coverage >= 90 ? "Healthy" : "Watch", assignedStaff + " of " + requiredStaff + " required role slots filled"),
+            new MetricCard("Pending Adjustments", String.valueOf(pendingAdjustments), pendingAdjustments > 0 ? "Review" : "Clear", pendingAdjustments + " requests waiting for manager action")
         );
 
         List<ShiftStatusCard> shiftStatuses = branchShifts.stream()

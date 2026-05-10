@@ -12,36 +12,50 @@ public final class ManagerActionDtos {
     }
 
     public record AdjustmentDecisionRequest(
-        @NotNull Long managerId,
-        @NotNull AdjustmentStatus status,
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotNull(message = "Choose whether to approve or reject the adjustment.")
+        AdjustmentStatus status,
         String note
     ) {
     }
 
     public record NotificationUpdateRequest(
-        @NotNull Boolean read
+        @NotNull(message = "Notification state is required.")
+        Boolean read
     ) {
     }
 
     public record EmployeeUpdateRequest(
-        @NotNull Long managerId,
-        @NotBlank String fullName,
-        @Email @NotBlank String email,
-        @NotBlank String jobTitle,
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotBlank(message = "Employee full name is required.")
+        String fullName,
+        @Email(message = "Enter a valid email address.")
+        @NotBlank(message = "Employee email is required.")
+        String email,
+        @NotBlank(message = "Employee job title is required.")
+        String jobTitle,
         String phoneNumber
     ) {
     }
 
     public record EmployeeArchiveRequest(
-        @NotNull Long managerId
+        @NotNull(message = "Manager session is required.")
+        Long managerId
     ) {
     }
 
     public record EmployeeCreateRequest(
-        @NotNull Long managerId,
-        @NotBlank String fullName,
-        @Email @NotBlank String email,
-        @NotBlank String jobTitle,
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotBlank(message = "Employee full name is required.")
+        String fullName,
+        @Email(message = "Enter a valid email address.")
+        @NotBlank(message = "Employee email is required.")
+        String email,
+        @NotBlank(message = "Employee job title is required.")
+        String jobTitle,
         String phoneNumber,
         LocalDate hireDate
     ) {
@@ -52,42 +66,60 @@ public final class ManagerActionDtos {
         String fullName,
         String email,
         String employeeCode,
+        Boolean emailDelivered,
         String temporaryPassword,
         String message
     ) {
     }
 
     public record CompliancePolicyCreateRequest(
-        @NotNull Long managerId,
-        @NotBlank String title,
-        @NotBlank String description,
-        @NotBlank String category,
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotBlank(message = "Policy title is required.")
+        String title,
+        @NotBlank(message = "Policy description is required.")
+        String description,
+        @NotBlank(message = "Policy category is required.")
+        String category,
         Boolean active
     ) {
     }
 
     public record CompliancePolicyStatusUpdateRequest(
-        @NotNull Long managerId,
-        @NotNull Boolean active
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotNull(message = "Policy status is required.")
+        Boolean active
     ) {
     }
 
     public record SettingsUpdateRequest(
-        @NotNull Long managerId,
-        @NotNull Boolean showSalaries,
-        @NotNull Boolean showPhoneNumbers,
-        @NotNull Boolean publicProfiles,
-        @NotNull Boolean autoSchedulingEnabled,
-        @NotBlank String shiftSwapApprovalMode,
-        @NotBlank String workWeekStartDay,
-        @NotNull Integer overtimeThresholdHours,
-        @NotBlank String currencyLocalization,
-        @NotBlank String departmentName
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotNull(message = "Salary visibility setting is required.")
+        Boolean showSalaries,
+        @NotNull(message = "Phone number visibility setting is required.")
+        Boolean showPhoneNumbers,
+        @NotNull(message = "Public profile visibility setting is required.")
+        Boolean publicProfiles,
+        @NotNull(message = "Auto-scheduling setting is required.")
+        Boolean autoSchedulingEnabled,
+        @NotBlank(message = "Shift swap approval mode is required.")
+        String shiftSwapApprovalMode,
+        @NotBlank(message = "Work week start day is required.")
+        String workWeekStartDay,
+        @NotNull(message = "Overtime threshold is required.")
+        Integer overtimeThresholdHours,
+        @NotBlank(message = "Currency and localization setting is required.")
+        String currencyLocalization,
+        @NotBlank(message = "Department focus is required.")
+        String departmentName
     ) {
     }
 
     public record TeamArchiveRequest(
-        @NotNull Long managerId
+        @NotNull(message = "Manager session is required.")
+        Long managerId
     ) {
     }
 }

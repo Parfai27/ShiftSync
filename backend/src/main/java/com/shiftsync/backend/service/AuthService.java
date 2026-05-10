@@ -1,6 +1,7 @@
 package com.shiftsync.backend.service;
 
 import com.shiftsync.backend.dto.AuthDtos.AuthResponse;
+import com.shiftsync.backend.dto.AuthDtos.ChangePasswordRequest;
 import com.shiftsync.backend.model.AuditLog;
 import com.shiftsync.backend.dto.AuthDtos.LoginRequest;
 import com.shiftsync.backend.dto.AuthDtos.RegisterRequest;
@@ -46,6 +47,7 @@ public class AuthService {
             user.getRole(),
             user.getBranch() != null ? user.getBranch().getId() : null,
             user.getProfileImageUrl(),
+            user.isMustChangePassword(),
             "Login successful"
         );
     }
@@ -65,6 +67,7 @@ public class AuthService {
             .role(request.role() == null ? Role.EMPLOYEE : request.role())
             .branch(branch)
             .active(true)
+            .mustChangePassword(false)
             .build();
 
         userRepository.save(user);
@@ -77,8 +80,30 @@ public class AuthService {
             user.getRole(),
             user.getBranch() != null ? user.getBranch().getId() : null,
             user.getProfileImageUrl(),
+            user.isMustChangePassword(),
             "Registration successful"
         );
+    }
+
+    public void changePassword(ChangePasswordRequest request) {
+        if (request.userId() == null) {
+            throw new IllegalArgumentException("User id is required");
+        }
+        if (request.newPassword().length() < 6) {
+            throw new IllegalArgumentException("New password must be at least 6 characters long");
+        }
+
+        User user = userRepository.findById(request.userId())
+            .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new IllegalArgumentException("Current password is incorrect");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.setMustChangePassword(false);
+        userRepository.save(user);
+        logLoginActivity(user, "Password changed", "User changed account password");
     }
 
     private void logLoginActivity(User actor, String action, String details) {

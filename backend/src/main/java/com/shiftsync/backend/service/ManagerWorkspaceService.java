@@ -58,6 +58,7 @@ import com.shiftsync.backend.model.Shift;
 import com.shiftsync.backend.model.ShiftAdjustmentRequest;
 import com.shiftsync.backend.model.ShiftAssignment;
 import com.shiftsync.backend.model.ShiftStatus;
+import com.shiftsync.backend.model.SwapResponseStatus;
 import com.shiftsync.backend.model.User;
 import com.shiftsync.backend.repository.AuditLogRepository;
 import com.shiftsync.backend.repository.BranchRepository;
@@ -94,9 +95,35 @@ public class ManagerWorkspaceService {
     private static final DateTimeFormatter AUDIT_TIME = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
     private static final List<String> REQUIRED_SHIFT_ROLES = List.of(
         "Pharmacist",
-        "Pharmacy Assistant / Attendant",
-        "Store Officer",
-        "Cashier"
+        "Pharmacy Assistant / Attendant"
+    );
+    private static final List<String> ALLOWED_EMPLOYEE_JOB_TITLES = List.of(
+        "Pharmacist",
+        "Pharmacy Assistant / Attendant"
+    );
+    private static final List<String> ALLOWED_POLICY_CATEGORIES = List.of(
+        "Scheduling",
+        "Compliance",
+        "Operations"
+    );
+    private static final List<String> ALLOWED_SHIFT_SWAP_MODES = List.of(
+        "Manual Review",
+        "Manager Approval",
+        "Auto Approve"
+    );
+    private static final List<String> ALLOWED_WORK_WEEK_START_DAYS = List.of(
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday"
+    );
+    private static final List<String> ALLOWED_CURRENCY_OPTIONS = List.of(
+        "RWF - Rwanda",
+        "USD - English",
+        "EUR - English"
     );
     private static final List<String> CANONICAL_SHIFT_NAMES = List.of(
         "Evening Shift",
@@ -114,6 +141,7 @@ public class ManagerWorkspaceService {
     private final CompliancePolicyRepository compliancePolicyRepository;
     private final AuditLogRepository auditLogRepository;
     private final PasswordEncoder passwordEncoder;
+    private final CredentialEmailService credentialEmailService;
 
     public ManagerWorkspaceResponse getWorkspace(Long userId, int rangeDays) {
         User manager = requireManager(userId);
@@ -172,9 +200,21 @@ public class ManagerWorkspaceService {
             throw new IllegalArgumentException("Adjustment does not belong to the manager pharmacy");
         }
 
+        if (
+            request.status() == AdjustmentStatus.APPROVED
+            && "Shift Swap".equalsIgnoreCase(adjustment.getAdjustmentType())
+            && adjustment.getTargetEmployeeResponse() != SwapResponseStatus.ACCEPTED
+        ) {
+            throw new IllegalArgumentException("Swap cannot be approved before the second employee accepts.");
+        }
+
         adjustment.setStatus(request.status());
         adjustment.setReviewedAt(java.time.LocalDateTime.now());
         adjustmentRepository.save(adjustment);
+
+        if (request.status() == AdjustmentStatus.APPROVED) {
+            applyApprovedAdjustment(adjustment, manager);
+        }
 
         String note = defaultString(request.note(), "No additional note recorded.");
         String action = request.status() == AdjustmentStatus.APPROVED ? "Approved shift adjustment" : "Rejected shift adjustment";
@@ -194,6 +234,74 @@ public class ManagerWorkspaceService {
                 .message("Your " + adjustment.getAdjustmentType() + " request was " + request.status().name().toLowerCase(Locale.ENGLISH) + " by " + manager.getFullName() + ".")
                 .priority(request.status() == AdjustmentStatus.APPROVED ? NotificationPriority.MEDIUM : NotificationPriority.HIGH)
                 .recipient(adjustment.getEmployee())
+                .read(false)
+                .build()
+        );
+    }
+
+    private void applyApprovedAdjustment(ShiftAdjustmentRequest adjustment, User manager) {
+        if ("Time Off Request".equalsIgnoreCase(adjustment.getAdjustmentType())) {
+            ShiftAssignment assigned = shiftAssignmentRepository.findByShiftId(adjustment.getShift().getId()).stream()
+                .filter(item -> item.getEmployee().getId().equals(adjustment.getEmployee().getId()))
+                .findFirst()
+                .orElse(null);
+            if (assigned != null) {
+                shiftAssignmentRepository.delete(assigned);
+                Shift shift = adjustment.getShift();
+                shift.setAssignedStaff(Math.max(0, shift.getAssignedStaff() - 1));
+                updateShiftStaffingStatus(shift);
+                shiftRepository.save(shift);
+            }
+            return;
+        }
+
+        if (
+            !"Shift Swap".equalsIgnoreCase(adjustment.getAdjustmentType()) ||
+            adjustment.getTargetEmployee() == null ||
+            adjustment.getTargetShift() == null
+        ) {
+            return;
+        }
+
+        ShiftAssignment currentAssignment = shiftAssignmentRepository.findByShiftId(adjustment.getShift().getId()).stream()
+            .filter(item -> item.getEmployee().getId().equals(adjustment.getEmployee().getId()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Original employee is no longer assigned to this shift."));
+
+        ShiftAssignment targetAssignment = shiftAssignmentRepository.findByShiftId(adjustment.getTargetShift().getId()).stream()
+            .filter(item -> item.getEmployee().getId().equals(adjustment.getTargetEmployee().getId()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Target employee is no longer assigned to the requested swap shift."));
+
+        if (!currentAssignment.getShift().getShiftDate().equals(targetAssignment.getShift().getShiftDate())) {
+            throw new IllegalArgumentException("Shift swaps must happen between shifts on the same day.");
+        }
+
+        String requesterRole = resolveShiftRole(adjustment.getEmployee());
+        String targetRole = resolveShiftRole(adjustment.getTargetEmployee());
+        if (requesterRole == null || targetRole == null || !requesterRole.equals(targetRole)) {
+            throw new IllegalArgumentException("Only employees with the same role can swap shifts.");
+        }
+
+        currentAssignment.setEmployee(adjustment.getTargetEmployee());
+        targetAssignment.setEmployee(adjustment.getEmployee());
+        currentAssignment.setAssignedAt(java.time.LocalDateTime.now());
+        targetAssignment.setAssignedAt(java.time.LocalDateTime.now());
+
+        shiftAssignmentRepository.save(currentAssignment);
+        shiftAssignmentRepository.save(targetAssignment);
+
+        updateShiftStaffingStatus(adjustment.getShift());
+        updateShiftStaffingStatus(adjustment.getTargetShift());
+        shiftRepository.save(adjustment.getShift());
+        shiftRepository.save(adjustment.getTargetShift());
+
+        notificationRepository.save(
+            Notification.builder()
+                .title("Shift swap approved")
+                .message("Your shift swap for " + adjustment.getShift().getShiftDate() + " was approved by " + manager.getFullName() + ".")
+                .priority(NotificationPriority.MEDIUM)
+                .recipient(adjustment.getTargetEmployee())
                 .read(false)
                 .build()
         );
@@ -262,8 +370,12 @@ public class ManagerWorkspaceService {
     public void updateEmployee(Long employeeId, EmployeeUpdateRequest request) {
         User manager = requireManager(request.managerId());
         User employee = requireManagedEmployee(manager, employeeId);
+        String normalizedName = normalizeRequiredText(request.fullName(), "Employee full name is required.");
+        String normalizedEmail = normalizeRequiredText(request.email(), "Employee email is required.").toLowerCase(Locale.ENGLISH);
+        String normalizedJobTitle = normalizeJobTitle(request.jobTitle());
+        validatePhoneNumber(request.phoneNumber());
 
-        userRepository.findByEmail(request.email())
+        userRepository.findByEmail(normalizedEmail)
             .filter(existing -> !existing.getId().equals(employee.getId()))
             .ifPresent(existing -> {
                 throw new IllegalArgumentException("That email address is already assigned to another user");
@@ -275,9 +387,9 @@ public class ManagerWorkspaceService {
                 .employeeCode("EMP-" + employee.getId())
                 .build());
 
-        employee.setFullName(request.fullName().trim());
-        employee.setEmail(request.email().trim().toLowerCase(Locale.ENGLISH));
-        profile.setJobTitle(request.jobTitle().trim());
+        employee.setFullName(normalizedName);
+        employee.setEmail(normalizedEmail);
+        profile.setJobTitle(normalizedJobTitle);
         profile.setPhoneNumber(defaultString(request.phoneNumber(), "").trim());
 
         userRepository.save(employee);
@@ -316,14 +428,16 @@ public class ManagerWorkspaceService {
     @Transactional
     public EmployeeCreateResponse createEmployee(EmployeeCreateRequest request) {
         User manager = requireManager(request.managerId());
+        String fullName = normalizeRequiredText(request.fullName(), "Employee full name is required.");
+        String email = normalizeRequiredText(request.email(), "Employee email is required.").toLowerCase(Locale.ENGLISH);
+        String normalizedJobTitle = normalizeJobTitle(request.jobTitle());
+        validatePhoneNumber(request.phoneNumber());
 
-        userRepository.findByEmail(request.email().trim().toLowerCase(Locale.ENGLISH))
+        userRepository.findByEmail(email)
             .ifPresent(existing -> {
                 throw new IllegalArgumentException("That email address is already assigned to another user");
             });
 
-        String fullName = request.fullName().trim();
-        String email = request.email().trim().toLowerCase(Locale.ENGLISH);
         String temporaryPassword = generateTemporaryPassword();
 
         User employee = User.builder()
@@ -334,6 +448,7 @@ public class ManagerWorkspaceService {
             .role(Role.EMPLOYEE)
             .branch(manager.getBranch())
             .active(true)
+            .mustChangePassword(true)
             .profileImageUrl("https://ui-avatars.com/api/?name=" + fullName.trim().replace(" ", "+") + "&background=0f51ff&color=ffffff")
             .build();
 
@@ -342,7 +457,7 @@ public class ManagerWorkspaceService {
         EmployeeProfile profile = EmployeeProfile.builder()
             .user(employee)
             .employeeCode(generateEmployeeCode())
-            .jobTitle(request.jobTitle().trim())
+            .jobTitle(normalizedJobTitle)
             .phoneNumber(normalizeOptional(request.phoneNumber()))
             .hireDate(request.hireDate() != null ? request.hireDate() : LocalDate.now())
             .hourlyRate(null)
@@ -372,24 +487,46 @@ public class ManagerWorkspaceService {
                 .build()
         );
 
+        boolean emailDelivered = credentialEmailService.sendNewEmployeeCredentials(
+            employee.getEmail(),
+            employee.getFullName(),
+            temporaryPassword
+        );
+
         return new EmployeeCreateResponse(
             employee.getId(),
             employee.getFullName(),
             employee.getEmail(),
             profile.getEmployeeCode(),
-            temporaryPassword,
-            "Employee account created successfully"
+            emailDelivered,
+            emailDelivered ? null : temporaryPassword,
+            emailDelivered
+                ? "Employee account created and credentials emailed successfully"
+                : "Employee account created, but credentials email could not be delivered"
         );
     }
 
     @Transactional
     public void createCompliancePolicy(CompliancePolicyCreateRequest request) {
         User manager = requireManager(request.managerId());
+        String title = normalizeRequiredText(request.title(), "Policy title is required.");
+        String description = normalizeRequiredText(request.description(), "Policy description is required.");
+        String category = normalizeRequiredText(request.category(), "Policy category is required.");
+
+        if (title.length() < 4) {
+            throw new IllegalArgumentException("Policy title must be at least 4 characters long");
+        }
+        if (description.length() < 12) {
+            throw new IllegalArgumentException("Policy description must be at least 12 characters long");
+        }
+        if (!ALLOWED_POLICY_CATEGORIES.contains(category)) {
+            throw new IllegalArgumentException("Choose a valid policy category");
+        }
 
         CompliancePolicy policy = CompliancePolicy.builder()
-            .title(request.title().trim())
-            .description(request.description().trim())
-            .category(request.category().trim())
+            .title(title)
+            .description(description)
+            .category(category)
             .active(request.active() == null || request.active())
             .branch(manager.getBranch())
             .build();
@@ -433,16 +570,36 @@ public class ManagerWorkspaceService {
     public void updateSettings(SettingsUpdateRequest request) {
         User manager = requireManager(request.managerId());
         Branch pharmacy = manager.getBranch();
+        String shiftSwapApprovalMode = normalizeRequiredText(request.shiftSwapApprovalMode(), "Shift swap approval mode is required.");
+        String workWeekStartDay = normalizeRequiredText(request.workWeekStartDay(), "Work week start day is required.");
+        String currencyLocalization = normalizeRequiredText(request.currencyLocalization(), "Currency and localization setting is required.");
+        String departmentName = normalizeRequiredText(request.departmentName(), "Department focus is required.");
+
+        if (!ALLOWED_SHIFT_SWAP_MODES.contains(shiftSwapApprovalMode)) {
+            throw new IllegalArgumentException("Choose a valid shift swap approval mode");
+        }
+        if (!ALLOWED_WORK_WEEK_START_DAYS.contains(workWeekStartDay)) {
+            throw new IllegalArgumentException("Choose a valid work week start day");
+        }
+        if (!ALLOWED_CURRENCY_OPTIONS.contains(currencyLocalization)) {
+            throw new IllegalArgumentException("Choose a valid currency and localization option");
+        }
+        if (departmentName.length() < 3) {
+            throw new IllegalArgumentException("Department focus must be at least 3 characters long");
+        }
+        if (request.overtimeThresholdHours() < 1 || request.overtimeThresholdHours() > 168) {
+            throw new IllegalArgumentException("Overtime threshold must be between 1 and 168 hours");
+        }
 
         pharmacy.setShowSalaries(request.showSalaries());
         pharmacy.setShowPhoneNumbers(request.showPhoneNumbers());
         pharmacy.setPublicProfiles(request.publicProfiles());
         pharmacy.setAutoSchedulingEnabled(request.autoSchedulingEnabled());
-        pharmacy.setShiftSwapApprovalMode(request.shiftSwapApprovalMode().trim());
-        pharmacy.setWorkWeekStartDay(request.workWeekStartDay().trim());
-        pharmacy.setOvertimeThresholdHours(Math.max(1, request.overtimeThresholdHours()));
-        pharmacy.setCurrencyLocalization(request.currencyLocalization().trim());
-        pharmacy.setDepartmentName(request.departmentName().trim());
+        pharmacy.setShiftSwapApprovalMode(shiftSwapApprovalMode);
+        pharmacy.setWorkWeekStartDay(workWeekStartDay);
+        pharmacy.setOvertimeThresholdHours(request.overtimeThresholdHours());
+        pharmacy.setCurrencyLocalization(currencyLocalization);
+        pharmacy.setDepartmentName(departmentName);
         branchRepository.save(pharmacy);
 
         auditLogRepository.save(
@@ -464,6 +621,10 @@ public class ManagerWorkspaceService {
             .filter(user -> user.getBranch() != null && manager.getBranch() != null)
             .filter(user -> user.getBranch().getId().equals(manager.getBranch().getId()))
             .toList();
+
+        if (employees.isEmpty()) {
+            throw new IllegalArgumentException("There are no active employees left to archive");
+        }
 
         employees.forEach(employee -> employee.setActive(false));
         userRepository.saveAll(employees);
@@ -575,7 +736,6 @@ public class ManagerWorkspaceService {
         int requiredStaff = nextWeekShifts.stream().mapToInt(Shift::getRequiredStaff).sum();
         int assignedStaff = nextWeekShifts.stream().mapToInt(Shift::getAssignedStaff).sum();
         int coverage = requiredStaff == 0 ? 0 : (int) Math.round((assignedStaff * 100.0) / requiredStaff);
-        int laborBudget = Math.min(100, 68 + coverage / 3);
 
         List<SchedulingStat> stats = List.of(
             new SchedulingStat("Total Hours", String.valueOf(totalHours), "Scheduled coverage hours"),
@@ -590,7 +750,7 @@ public class ManagerWorkspaceService {
             .map(entry -> new SchedulingDay(
                 entry.getKey().format(SHORT_DAY),
                 entry.getKey().format(SHORT_DATE),
-                entry.getValue().stream().anyMatch(shift -> shift.getAssignedStaff() < shift.getRequiredStaff()) ? "GAP" : null
+                buildCoverageAlertForDay(entry.getKey(), assignments)
             ))
             .toList();
 
@@ -647,6 +807,7 @@ public class ManagerWorkspaceService {
                         date.format(SHORT_DAY),
                         date.format(SHORT_DATE),
                         date.format(DATE_LABEL),
+                        date.toString(),
                         dayLanes.stream().anyMatch(lane -> lane.assignedStaff() < lane.requiredStaff()),
                         dayLanes
                     );
@@ -704,6 +865,13 @@ public class ManagerWorkspaceService {
         Shift busiestShift = nextWeekShifts.stream()
             .max(Comparator.comparing(Shift::getAssignedStaff))
             .orElse(null);
+        List<String> dailyCoverageAlerts = nextWeekShifts.stream()
+            .map(Shift::getShiftDate)
+            .distinct()
+            .sorted()
+            .map(date -> buildCoverageAlertForDay(date, assignments))
+            .filter(alert -> alert != null && !alert.isBlank())
+            .toList();
 
         return new SchedulingSection(
             "Managing " + (nextWeekShifts.isEmpty() ? "the upcoming rota" : rangeStart.format(DATE_LABEL) + " to " + rangeEnd.format(DATE_LABEL)) + " for continuous pharmacy coverage.",
@@ -717,13 +885,15 @@ public class ManagerWorkspaceService {
                 "Weekly 24/7 staffing snapshot",
                 busiestShift == null ? "No shifts yet" : busiestShift.getName() + " • " + formatShiftWindow(busiestShift),
                 employees.size() + " pharmacy staff active",
-                openShifts + " staffing gap" + (openShifts == 1 ? "" : "s") + " this week"
+                dailyCoverageAlerts.isEmpty()
+                    ? "All visible days have both required roles covered"
+                    : dailyCoverageAlerts.getFirst()
             ),
             new SchedulingSuggestion(
                 "Auto Suggest",
                 "Balance role coverage across the weekly rota",
                 openShifts > 0
-                    ? "Fill the earliest open role on the weekly rota to keep 24/7 dispensing, stock control, and payment coverage intact."
+                    ? "Fill the earliest open role on the weekly rota to keep both the pharmacist and assistant present every day."
                     : "Coverage is healthy. Keep the current weekly rotation and watch fatigue across overnight and late shifts.",
                 "Assign Available Staff"
             )
@@ -738,8 +908,17 @@ public class ManagerWorkspaceService {
                 request.getAdjustmentType() + " • " + request.getCreatedAt().format(DATE_LABEL),
                 request.getShift().getName(),
                 request.getShift().getShiftDate().format(DATE_LABEL) + " • " + formatShiftWindow(request.getShift()),
-                request.getStatus() == AdjustmentStatus.PENDING ? "Awaiting manager decision" : "Manager decision recorded",
-                request.getRequestedChange(),
+                request.getTargetEmployee() == null
+                    ? (request.getStatus() == AdjustmentStatus.PENDING ? "Awaiting manager decision" : "Manager decision recorded")
+                    : "Swap with " + request.getTargetEmployee().getFullName(),
+                request.getTargetShift() != null
+                    ? request.getTargetShift().getName() + " â€¢ " + request.getTargetShift().getShiftDate().format(DATE_LABEL) + " â€¢ " + formatShiftWindow(request.getTargetShift())
+                    : request.getRequestedChange()
+                        + (
+                            request.getTargetEmployeeResponse() != null
+                                ? " | Peer response: " + request.getTargetEmployeeResponse().name()
+                                : ""
+                        ),
                 request.getRequestedChange(),
                 request.getStatus().name()
             ))
@@ -955,8 +1134,7 @@ public class ManagerWorkspaceService {
             List.of(
                 new ReportMetric("Total Active Employees", String.valueOf(employees.size()), "+4.0%", "bg-blue-50 text-blue-600"),
                 new ReportMetric("Average Attendance", attendance + "%", attendance >= 90 ? "Stable" : "-2.0%", attendance >= 90 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"),
-                new ReportMetric("Overtime Hours", overtimeHours + "h", overtimeHours > 0 ? "+1.8%" : "Stable", "bg-orange-50 text-orange-600"),
-                new ReportMetric("Est. Labor Cost", "RWF 3.4M", "Stable", "bg-slate-100 text-slate-500")
+                new ReportMetric("Overtime Hours", overtimeHours + "h", overtimeHours > 0 ? "+1.8%" : "Stable", "bg-orange-50 text-orange-600")
             ),
             attendanceBars,
             weekLabels,
@@ -988,6 +1166,38 @@ public class ManagerWorkspaceService {
         );
     }
 
+    private String buildCoverageAlertForDay(LocalDate date, List<ShiftAssignment> assignments) {
+        List<String> coveredRoles = assignments.stream()
+            .filter(item -> item.getShift().getShiftDate().equals(date))
+            .map(ShiftAssignment::getEmployee)
+            .map(this::resolveShiftRole)
+            .filter(role -> role != null && !role.isBlank())
+            .distinct()
+            .toList();
+
+        List<String> missingRoles = REQUIRED_SHIFT_ROLES.stream()
+            .filter(role -> !coveredRoles.contains(role))
+            .toList();
+
+        if (missingRoles.isEmpty()) {
+            return null;
+        }
+
+        return "Missing " + String.join(" and ", missingRoles);
+    }
+
+    private void updateShiftStaffingStatus(Shift shift) {
+        if (shift.getAssignedStaff() <= 0) {
+            shift.setStatus(ShiftStatus.UNDERSTAFFED);
+            return;
+        }
+        if (shift.getAssignedStaff() < shift.getRequiredStaff()) {
+            shift.setStatus(ShiftStatus.PARTIALLY_STAFFED);
+            return;
+        }
+        shift.setStatus(ShiftStatus.FULL);
+    }
+
     private String resolveDepartment(EmployeeProfile profile) {
         if (profile == null || profile.getJobTitle() == null) {
             return "Pharmacy Operations";
@@ -995,9 +1205,6 @@ public class ManagerWorkspaceService {
         String role = profile.getJobTitle().toLowerCase(Locale.ENGLISH);
         if (role.contains("inventory")) {
             return "Inventory & Supply";
-        }
-        if (role.contains("cashier") || role.contains("front")) {
-            return "Customer Service";
         }
         return "Pharmacy Operations";
     }
@@ -1065,12 +1272,6 @@ public class ManagerWorkspaceService {
         if (normalized.contains("assistant") || normalized.contains("attendant") || normalized.contains("technician")) {
             return "Pharmacy Assistant / Attendant";
         }
-        if (normalized.contains("store") || normalized.contains("inventory")) {
-            return "Store Officer";
-        }
-        if (normalized.contains("cashier") || normalized.contains("front desk")) {
-            return "Cashier";
-        }
         return null;
     }
 
@@ -1078,8 +1279,6 @@ public class ManagerWorkspaceService {
         return switch (role) {
             case "Pharmacist" -> "PH";
             case "Pharmacy Assistant / Attendant" -> "PA";
-            case "Store Officer" -> "SO";
-            case "Cashier" -> "CA";
             default -> role.substring(0, Math.min(2, role.length())).toUpperCase(Locale.ENGLISH);
         };
     }
@@ -1104,8 +1303,33 @@ public class ManagerWorkspaceService {
         return value == null || value.isBlank() ? fallback : value;
     }
 
+    private String normalizeRequiredText(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(message);
+        }
+        return value.trim();
+    }
+
     private String normalizeOptional(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String normalizeJobTitle(String jobTitle) {
+        String normalized = normalizeRequiredText(jobTitle, "Employee job title is required.");
+        if (!ALLOWED_EMPLOYEE_JOB_TITLES.contains(normalized)) {
+            throw new IllegalArgumentException("Employee role must be either Pharmacist or Pharmacy Assistant / Attendant");
+        }
+        return normalized;
+    }
+
+    private void validatePhoneNumber(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return;
+        }
+        String normalized = phoneNumber.trim();
+        if (!normalized.matches("^\\+?[0-9]{10,15}$")) {
+            throw new IllegalArgumentException("Phone number must contain 10 to 15 digits");
+        }
     }
 
     private String generateUsername(String email, String fullName) {

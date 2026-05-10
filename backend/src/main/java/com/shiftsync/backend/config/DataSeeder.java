@@ -34,6 +34,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,14 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class DataSeeder implements CommandLineRunner {
     private static final Set<String> CANONICAL_SHIFT_NAMES = Set.of("Evening Shift", "1st Shift", "2nd Shift");
+    private static final Set<String> CORE_EMPLOYEE_USERNAMES = Set.of(
+        "employee",
+        "frida.mukamana",
+        "patrick.habimana",
+        "grace.uwase",
+        "claude.irakoze",
+        "pacifique.mugisha"
+    );
 
 
     private final BranchRepository branchRepository;
@@ -76,6 +85,7 @@ public class DataSeeder implements CommandLineRunner {
             ));
 
         removeLegacyShiftModelData(branch);
+        deactivateExtraSeedEmployees(branch);
 
         User admin = upsertUser(
             "admin",
@@ -152,75 +162,50 @@ public class DataSeeder implements CommandLineRunner {
             branch,
             "https://ui-avatars.com/api/?name=Pacifique+Mugisha&background=1e40af&color=ffffff"
         );
-        User staff6 = upsertUser(
-            "brenda.uwingabiye",
-            "Brenda Uwingabiye",
-            "brenda.uwingabiye@ngabopharmacy.rw",
-            "brenda123",
-            Role.EMPLOYEE,
-            branch,
-            "https://ui-avatars.com/api/?name=Brenda+Uwingabiye&background=3730a3&color=ffffff"
-        );
-        User staff7 = upsertUser(
-            "jeanclaude.hategekimana",
-            "Jean Claude Hategekimana",
-            "jeanclaude.hategekimana@ngabopharmacy.rw",
-            "jeanclaude123",
-            Role.EMPLOYEE,
-            branch,
-            "https://ui-avatars.com/api/?name=Jean+Claude+Hategekimana&background=2563eb&color=ffffff"
-        );
-        User staff8 = upsertUser(
-            "chantal.mukantwari",
-            "Chantal Mukantwari",
-            "chantal.mukantwari@ngabopharmacy.rw",
-            "chantal123",
-            Role.EMPLOYEE,
-            branch,
-            "https://ui-avatars.com/api/?name=Chantal+Mukantwari&background=1d4ed8&color=ffffff"
-        );
-
         upsertProfile(manager, "MGR-001", "Shift Manager", "0788001101", LocalDate.of(2021, 3, 14), "0788001199");
         upsertProfile(pharmacist, "EMP-101", "Pharmacist", "0788002201", LocalDate.of(2022, 5, 18), "0788002299");
         upsertProfile(staff1, "EMP-102", "Pharmacy Assistant / Attendant", "0788002202", LocalDate.of(2023, 1, 9), "0788002298");
-        upsertProfile(staff2, "EMP-103", "Store Officer", "0788002203", LocalDate.of(2022, 8, 2), "0788002297");
-        upsertProfile(staff3, "EMP-104", "Cashier", "0788002204", LocalDate.of(2024, 2, 12), "0788002296");
+        upsertProfile(staff2, "EMP-103", "Pharmacist", "0788002203", LocalDate.of(2022, 8, 2), "0788002297");
+        upsertProfile(staff3, "EMP-104", "Pharmacy Assistant / Attendant", "0788002204", LocalDate.of(2024, 2, 12), "0788002296");
         upsertProfile(staff4, "EMP-105", "Pharmacist", "0788002205", LocalDate.of(2023, 11, 3), "0788002295");
         upsertProfile(staff5, "EMP-106", "Pharmacy Assistant / Attendant", "0788002206", LocalDate.of(2023, 7, 20), "0788002294");
-        upsertProfile(staff6, "EMP-107", "Store Officer", "0788002207", LocalDate.of(2022, 12, 6), "0788002293");
-        upsertProfile(staff7, "EMP-108", "Cashier", "0788002208", LocalDate.of(2024, 1, 18), "0788002292");
-        upsertProfile(staff8, "EMP-109", "Pharmacist", "0788002209", LocalDate.of(2024, 4, 3), "0788002291");
 
         LocalDate weekStart = LocalDate.now().with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.MONDAY));
-        Shift mondayNight = upsertShift(branch, "Evening Shift", weekStart, LocalTime.of(23, 0), LocalTime.of(7, 0), 4, 4, ShiftStatus.FULL);
-        Shift mondayFirst = upsertShift(branch, "1st Shift", weekStart, LocalTime.of(7, 0), LocalTime.of(15, 0), 4, 4, ShiftStatus.FULL);
-        Shift mondaySecond = upsertShift(branch, "2nd Shift", weekStart, LocalTime.of(15, 0), LocalTime.of(23, 0), 4, 3, ShiftStatus.PARTIALLY_STAFFED);
-        Shift tuesdayNight = upsertShift(branch, "Evening Shift", weekStart.plusDays(1), LocalTime.of(23, 0), LocalTime.of(7, 0), 4, 2, ShiftStatus.UNDERSTAFFED);
+        resetSeededWeeklyAssignments(branch, weekStart);
+        List<String> shiftNames = List.of("1st Shift", "2nd Shift", "Evening Shift");
+        List<LocalTime> shiftStarts = List.of(LocalTime.of(7, 0), LocalTime.of(15, 0), LocalTime.of(23, 0));
+        List<LocalTime> shiftEnds = List.of(LocalTime.of(15, 0), LocalTime.of(23, 0), LocalTime.of(7, 0));
 
-        upsertAssignment(mondayNight, pharmacist, LocalDateTime.now().minusDays(2));
-        upsertAssignment(mondayNight, staff1, LocalDateTime.now().minusDays(2));
-        upsertAssignment(mondayNight, staff2, LocalDateTime.now().minusDays(2));
-        upsertAssignment(mondayNight, staff3, LocalDateTime.now().minusDays(2));
+        java.util.Map<String, Shift> seededShifts = new java.util.HashMap<>();
+        for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
+            LocalDate shiftDate = weekStart.plusDays(dayOffset);
+            for (int shiftIndex = 0; shiftIndex < shiftNames.size(); shiftIndex++) {
+                Shift shift = upsertShift(
+                    branch,
+                    shiftNames.get(shiftIndex),
+                    shiftDate,
+                    shiftStarts.get(shiftIndex),
+                    shiftEnds.get(shiftIndex),
+                    2,
+                    0,
+                    ShiftStatus.UNDERSTAFFED
+                );
+                seededShifts.put(shiftDate + "::" + shiftNames.get(shiftIndex), shift);
+            }
+        }
 
-        upsertAssignment(mondayFirst, staff4, LocalDateTime.now().minusDays(2));
-        upsertAssignment(mondayFirst, staff5, LocalDateTime.now().minusDays(2));
-        upsertAssignment(mondayFirst, staff6, LocalDateTime.now().minusDays(2));
-        upsertAssignment(mondayFirst, staff7, LocalDateTime.now().minusDays(2));
+        Shift mondayNight = seededShifts.get(weekStart + "::Evening Shift");
+        Shift mondayFirst = seededShifts.get(weekStart + "::1st Shift");
+        Shift mondaySecond = seededShifts.get(weekStart + "::2nd Shift");
+        Shift tuesdayNight = seededShifts.get(weekStart.plusDays(1) + "::Evening Shift");
 
-        upsertAssignment(mondaySecond, staff8, LocalDateTime.now().minusDays(1));
-        upsertAssignment(mondaySecond, staff1, LocalDateTime.now().minusDays(1));
-        upsertAssignment(mondaySecond, staff2, LocalDateTime.now().minusDays(1));
-
-        upsertAssignment(tuesdayNight, staff4, LocalDateTime.now().minusHours(10));
-        upsertAssignment(tuesdayNight, staff5, LocalDateTime.now().minusHours(10));
-
-        upsertAvailability(staff3, weekStart.plusDays(1), AvailabilityStatus.PREFERRED, LocalTime.of(23, 0), LocalTime.of(7, 0), "Available for overnight cashier coverage.");
-        upsertAvailability(staff6, weekStart.plusDays(1), AvailabilityStatus.AVAILABLE, LocalTime.of(23, 0), LocalTime.of(7, 0), "Ready for overnight store supervision.");
-        upsertAvailability(staff7, weekStart.plusDays(2), AvailabilityStatus.UNAVAILABLE, null, null, "Off duty for personal leave.");
+        upsertAvailability(staff3, weekStart.plusDays(1), AvailabilityStatus.PREFERRED, LocalTime.of(23, 0), LocalTime.of(7, 0), "Available for overnight pharmacy assistant coverage.");
+        upsertAvailability(staff2, weekStart.plusDays(1), AvailabilityStatus.AVAILABLE, LocalTime.of(23, 0), LocalTime.of(7, 0), "Ready for overnight pharmacist coverage.");
+        upsertAvailability(staff5, weekStart.plusDays(2), AvailabilityStatus.UNAVAILABLE, null, null, "Off duty for personal leave.");
 
         upsertAdjustment(pharmacist, mondaySecond, "Shift Swap", "Swap the second shift with another pharmacist for the Tuesday evening rotation.", AdjustmentStatus.PENDING, null);
-        upsertAdjustment(staff2, tuesdayNight, "Overtime Request", "Extend the overnight store officer coverage by one hour for stock receiving.", AdjustmentStatus.APPROVED, LocalDateTime.now().minusHours(6));
-        upsertAdjustment(staff3, mondayNight, "Time Off Request", "Request leave from the overnight cashier shift for a family commitment.", AdjustmentStatus.REJECTED, LocalDateTime.now().minusDays(1));
+        upsertAdjustment(staff2, tuesdayNight, "Overtime Request", "Extend the overnight pharmacist coverage by one hour for stock receiving.", AdjustmentStatus.APPROVED, LocalDateTime.now().minusHours(6));
+        upsertAdjustment(staff3, mondayNight, "Time Off Request", "Request leave from the overnight pharmacy assistant shift for a family commitment.", AdjustmentStatus.REJECTED, LocalDateTime.now().minusDays(1));
 
         upsertAnnouncement(
             branch,
@@ -233,11 +218,11 @@ public class DataSeeder implements CommandLineRunner {
             branch,
             manager,
             "Weekend vaccination outreach",
-            "Weekend coverage must preserve prescription dispensing, vaccine stock handling, and cashier support at all times.",
+            "Weekend coverage must preserve prescription dispensing and pharmacy assistant support at all times.",
             LocalDateTime.now().minusDays(1)
         );
 
-        upsertNotification(manager, "Urgent: overnight shift below safe coverage", "The evening shift on " + tuesdayNight.getShiftDate() + " still requires cashier and store officer coverage.", NotificationPriority.HIGH, false);
+        upsertNotification(manager, "Weekly schedule published", "The roster for " + weekStart + " is fully assigned across all three daily shifts.", NotificationPriority.HIGH, false);
         upsertNotification(manager, "Shift swap request awaiting review", "Eric Ndayisaba submitted a live shift adjustment request for the second shift rota.", NotificationPriority.MEDIUM, false);
         upsertNotification(manager, "Compliance reminder", "Controlled medicines documentation is due before branch opening tomorrow.", NotificationPriority.LOW, true);
         upsertNotification(pharmacist, "Upcoming overnight shift", "You are scheduled for overnight pharmacist coverage at 23:00.", NotificationPriority.MEDIUM, false);
@@ -246,11 +231,39 @@ public class DataSeeder implements CommandLineRunner {
         upsertPolicy(branch, "Mandatory Rest Period", "Maintain at least 11 continuous hours between closing and opening shifts for all pharmacy staff.", "Scheduling", true);
         upsertPolicy(branch, "Controlled Medicines Register", "Every controlled medicines movement must be recorded during the same service window.", "Compliance", true);
 
-        upsertPayroll(pharmacist, LocalDate.now().minusDays(14), LocalDate.now(), new BigDecimal("72.0"), new BigDecimal("4.0"), new BigDecimal("186000.00"));
-        upsertPayroll(staff2, LocalDate.now().minusDays(14), LocalDate.now(), new BigDecimal("68.0"), new BigDecimal("2.0"), new BigDecimal("171500.00"));
+        reseedMonthlyPayroll(pharmacist, List.of(
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(2), new BigDecimal("168.0"), new BigDecimal("10.0"), new BigDecimal("457500.00")),
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(1), new BigDecimal("160.0"), new BigDecimal("8.0"), new BigDecimal("430000.00")),
+            new MonthlyPayrollSeed(YearMonth.now(), new BigDecimal("168.0"), new BigDecimal("12.0"), new BigDecimal("465000.00"))
+        ));
+        reseedMonthlyPayroll(staff1, List.of(
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(2), new BigDecimal("160.0"), new BigDecimal("6.0"), new BigDecimal("382500.00")),
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(1), new BigDecimal("168.0"), new BigDecimal("4.0"), new BigDecimal("435000.00")),
+            new MonthlyPayrollSeed(YearMonth.now(), new BigDecimal("160.0"), new BigDecimal("8.0"), new BigDecimal("430000.00"))
+        ));
+        reseedMonthlyPayroll(staff2, List.of(
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(2), new BigDecimal("168.0"), new BigDecimal("8.0"), new BigDecimal("450000.00")),
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(1), new BigDecimal("160.0"), new BigDecimal("6.0"), new BigDecimal("422500.00")),
+            new MonthlyPayrollSeed(YearMonth.now(), new BigDecimal("168.0"), new BigDecimal("10.0"), new BigDecimal("457500.00"))
+        ));
+        reseedMonthlyPayroll(staff3, List.of(
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(2), new BigDecimal("160.0"), new BigDecimal("4.0"), new BigDecimal("415000.00")),
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(1), new BigDecimal("152.0"), new BigDecimal("6.0"), new BigDecimal("402500.00")),
+            new MonthlyPayrollSeed(YearMonth.now(), new BigDecimal("160.0"), new BigDecimal("6.0"), new BigDecimal("422500.00"))
+        ));
+        reseedMonthlyPayroll(staff4, List.of(
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(2), new BigDecimal("168.0"), new BigDecimal("12.0"), new BigDecimal("465000.00")),
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(1), new BigDecimal("160.0"), new BigDecimal("8.0"), new BigDecimal("430000.00")),
+            new MonthlyPayrollSeed(YearMonth.now(), new BigDecimal("168.0"), new BigDecimal("8.0"), new BigDecimal("450000.00"))
+        ));
+        reseedMonthlyPayroll(staff5, List.of(
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(2), new BigDecimal("152.0"), new BigDecimal("4.0"), new BigDecimal("395000.00")),
+            new MonthlyPayrollSeed(YearMonth.now().minusMonths(1), new BigDecimal("160.0"), new BigDecimal("6.0"), new BigDecimal("422500.00")),
+            new MonthlyPayrollSeed(YearMonth.now(), new BigDecimal("160.0"), new BigDecimal("4.0"), new BigDecimal("415000.00"))
+        ));
 
         upsertAuditLog(admin, "Updated pharmacy staffing policy", "Compliance", LocalDateTime.now().minusHours(9), "Reinforced handover coverage for controlled medicines at branch close.");
-        upsertAuditLog(manager, "Approved overtime request", "Scheduling", LocalDateTime.now().minusHours(6), "Approved extended inventory balancing support for the overnight store coverage.");
+        upsertAuditLog(manager, "Approved overtime request", "Scheduling", LocalDateTime.now().minusHours(6), "Approved extended pharmacy coverage support for the overnight rotation.");
         upsertAuditLog(manager, "Reviewed branch notification queue", "Notifications", LocalDateTime.now().minusHours(3), "Cleared one completed reminder and left urgent items active for follow-up.");
     }
 
@@ -283,6 +296,41 @@ public class DataSeeder implements CommandLineRunner {
         shiftRepository.deleteAll(legacyShifts);
     }
 
+    private void deactivateExtraSeedEmployees(Branch branch) {
+        userRepository.findByRole(Role.EMPLOYEE).stream()
+            .filter(user -> user.getBranch() != null && user.getBranch().getId().equals(branch.getId()))
+            .filter(user -> !CORE_EMPLOYEE_USERNAMES.contains(user.getUsername()))
+            .filter(User::isActive)
+            .forEach(user -> {
+                user.setActive(false);
+                userRepository.save(user);
+            });
+    }
+
+    private void resetSeededWeeklyAssignments(Branch branch, LocalDate weekStart) {
+        LocalDate weekEnd = weekStart.plusDays(6);
+        List<Shift> seededWeekShifts = shiftRepository.findByBranchId(branch.getId()).stream()
+            .filter(shift -> shift.getName() != null && CANONICAL_SHIFT_NAMES.contains(shift.getName()))
+            .filter(shift -> !shift.getShiftDate().isBefore(weekStart) && !shift.getShiftDate().isAfter(weekEnd))
+            .toList();
+
+        if (seededWeekShifts.isEmpty()) {
+            return;
+        }
+
+        List<Long> seededShiftIds = seededWeekShifts.stream().map(Shift::getId).toList();
+        shiftAdjustmentRequestRepository.deleteAll(
+            shiftAdjustmentRequestRepository.findAll().stream()
+                .filter(request -> request.getShift() != null && seededShiftIds.contains(request.getShift().getId()))
+                .toList()
+        );
+        shiftAssignmentRepository.deleteAll(
+            seededWeekShifts.stream()
+                .flatMap(shift -> shiftAssignmentRepository.findByShiftId(shift.getId()).stream())
+                .toList()
+        );
+    }
+
     private User upsertUser(String username, String fullName, String email, String rawPassword, Role role, Branch branch, String profileImageUrl) {
         User user = userRepository.findByUsername(username).orElseGet(User::new);
         user.setUsername(username);
@@ -292,6 +340,7 @@ public class DataSeeder implements CommandLineRunner {
         user.setRole(role);
         user.setBranch(branch);
         user.setActive(true);
+        user.setMustChangePassword(false);
         user.setProfileImageUrl(profileImageUrl);
         return userRepository.save(user);
     }
@@ -306,6 +355,11 @@ public class DataSeeder implements CommandLineRunner {
         profile.setHourlyRate(new BigDecimal("2500.00"));
         profile.setEmergencyContactName("Primary Contact");
         profile.setEmergencyContactPhone(emergencyPhone);
+        profile.setNotifyScheduleChanges(true);
+        profile.setNotifyCompanyNews(true);
+        profile.setNotifyTeamMessages(true);
+        profile.setHideProfile(false);
+        profile.setQuietHoursEnabled(true);
         employeeProfileRepository.save(profile);
     }
 
@@ -436,6 +490,33 @@ public class DataSeeder implements CommandLineRunner {
                     .build()
             );
         }
+    }
+
+    private void reseedMonthlyPayroll(User employee, List<MonthlyPayrollSeed> monthlySeeds) {
+        payrollRecordRepository.deleteAll(
+            payrollRecordRepository.findAll().stream()
+                .filter(item -> item.getEmployee() != null && item.getEmployee().getId().equals(employee.getId()))
+                .toList()
+        );
+
+        for (MonthlyPayrollSeed monthlySeed : monthlySeeds) {
+            upsertPayroll(
+                employee,
+                monthlySeed.month().atDay(1),
+                monthlySeed.month().atEndOfMonth(),
+                monthlySeed.regularHours(),
+                monthlySeed.overtimeHours(),
+                monthlySeed.grossPay()
+            );
+        }
+    }
+
+    private record MonthlyPayrollSeed(
+        YearMonth month,
+        BigDecimal regularHours,
+        BigDecimal overtimeHours,
+        BigDecimal grossPay
+    ) {
     }
 
     private void upsertAuditLog(User actor, String action, String module, LocalDateTime actionTime, String details) {

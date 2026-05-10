@@ -27,15 +27,22 @@ import ManagerProfileMenu from '../shared/ManagerProfileMenu'
 import MobileManagerMenu from '../shared/MobileManagerMenu'
 import ThemeToggleButton from '../shared/ThemeToggleButton'
 
-function NotificationCard({ item, onOpen, onPrimaryAction, onSecondaryAction, pendingNotificationId }) {
+function NotificationCard({ item, onNavigate, onOpen, onPrimaryAction, onSecondaryAction, pendingNotificationId }) {
 	if (item.kind === 'urgent') {
 		return (
-			<article className={`cursor-pointer overflow-hidden rounded-[26px] border bg-white transition ${item.read ? 'border-slate-200/80 opacity-80' : 'border-rose-300 shadow-[0_18px_45px_rgba(217,45,32,0.12)]'}`} onClick={() => onOpen(item)} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && onOpen(item)}>
+			<article className={`cursor-pointer overflow-hidden rounded-[26px] border bg-white transition ${item.read ? 'border-slate-200/80 opacity-80' : 'border-rose-300 shadow-[0_18px_45px_rgba(217,45,32,0.12)]'}`} onClick={() => onNavigate(item)} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && onNavigate(item)}>
 				<div className="grid gap-4 border-l-4 border-rose-600 p-5 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-start">
 					<div className="flex items-start gap-4">
-						<div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+						<button
+							className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600"
+							onClick={(event) => {
+								event.stopPropagation()
+								onOpen(item)
+							}}
+							type="button"
+						>
 							<FiAlertTriangle className="h-5 w-5" />
-						</div>
+						</button>
 						<div className="min-w-0">
 							<div className="flex flex-wrap items-center gap-3">
 								<h3 className="text-lg font-black tracking-[-0.04em] text-slate-950 sm:text-xl">{item.title}</h3>
@@ -77,12 +84,19 @@ function NotificationCard({ item, onOpen, onPrimaryAction, onSecondaryAction, pe
 	}
 
 	return (
-		<article className={`cursor-pointer rounded-[26px] border p-5 transition sm:p-6 ${item.read ? 'border-slate-200/80 bg-white opacity-80' : item.kind === 'info' ? 'border-blue-200 bg-[#eef3ff] shadow-[0_18px_45px_rgba(15,81,255,0.08)]' : 'border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]'}`} onClick={() => onOpen(item)} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && onOpen(item)}>
+		<article className={`cursor-pointer rounded-[26px] border p-5 transition sm:p-6 ${item.read ? 'border-slate-200/80 bg-white opacity-80' : item.kind === 'info' ? 'border-blue-200 bg-[#eef3ff] shadow-[0_18px_45px_rgba(15,81,255,0.08)]' : 'border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]'}`} onClick={() => onNavigate(item)} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && onNavigate(item)}>
 			<div className="flex items-start justify-between gap-4">
 				<div className="flex items-start gap-4">
-					<div className={`flex h-12 w-12 items-center justify-center rounded-full ${item.read ? 'bg-white text-slate-400' : 'bg-white text-[#0f51ff]'}`}>
+					<button
+						className={`flex h-12 w-12 items-center justify-center rounded-full ${item.read ? 'bg-white text-slate-400' : 'bg-white text-[#0f51ff]'}`}
+						onClick={(event) => {
+							event.stopPropagation()
+							onOpen(item)
+						}}
+						type="button"
+					>
 						{item.kind === 'swap' ? <FiCheckCircle className="h-5 w-5" /> : <FiMail className="h-5 w-5" />}
-					</div>
+					</button>
 					<div>
 						<div className="flex flex-wrap items-center gap-3">
 							<h3 className="text-lg font-black tracking-[-0.04em] text-slate-950">{item.title}</h3>
@@ -131,7 +145,7 @@ function NotificationCard({ item, onOpen, onPrimaryAction, onSecondaryAction, pe
 	)
 }
 
-function NotificationReader({ item, onClose, onToggleRead, pendingNotificationId }) {
+function NotificationReader({ item, onClose, onToggleRead, onOpenRelated, pendingNotificationId }) {
 	if (!item) {
 		return null
 	}
@@ -169,6 +183,11 @@ function NotificationReader({ item, onClose, onToggleRead, pendingNotificationId
 				) : null}
 
 				<div className="mt-6 flex flex-wrap items-center gap-3">
+					{resolveNotificationPath(item) ? (
+						<button className="rounded-xl bg-[#eef2ff] px-4 py-3 text-sm font-bold text-[#0f51ff]" onClick={() => onOpenRelated(item)} type="button">
+							Open Related Page
+						</button>
+					) : null}
 					<button
 						className="rounded-xl bg-[#0f51ff] px-4 py-3 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60"
 						onClick={() => onToggleRead(item.id, !item.read)}
@@ -184,6 +203,29 @@ function NotificationReader({ item, onClose, onToggleRead, pendingNotificationId
 			</div>
 		</div>
 	)
+}
+
+function resolveNotificationPath(item) {
+	const text = [item.title, item.description, item.kind, item.original || '', item.proposed || ''].join(' ').toLowerCase()
+	if (text.includes('policy') || text.includes('compliance')) {
+		return '/compliances'
+	}
+	if (text.includes('profile') || text.includes('employee')) {
+		return '/profiles'
+	}
+	if (text.includes('report') || text.includes('attendance')) {
+		return '/reports'
+	}
+	if (text.includes('swap') || text.includes('adjustment') || text.includes('request')) {
+		return '/adjustments'
+	}
+	if (text.includes('shift') || text.includes('schedule') || text.includes('coverage')) {
+		return '/scheduling'
+	}
+	if (text.includes('setting')) {
+		return '/manager-settings'
+	}
+	return null
 }
 
 export default function Notifications() {
@@ -245,6 +287,22 @@ export default function Notifications() {
 			'System Updates': systemUpdates,
 		}
 	}, [allItems])
+
+	function openNotificationDetails(item) {
+		setSelectedNotification(item)
+	}
+
+	function openNotificationRoute(item) {
+		const path = resolveNotificationPath(item)
+		if (!path) {
+			openNotificationDetails(item)
+			return
+		}
+		if (!item.read) {
+			void updateNotification(item.id, true)
+		}
+		navigate(path)
+	}
 
 	async function updateNotification(notificationId, read = true) {
 		try {
@@ -391,7 +449,8 @@ export default function Notifications() {
 											<NotificationCard
 												key={item.id}
 												item={item}
-												onOpen={setSelectedNotification}
+												onNavigate={openNotificationRoute}
+												onOpen={openNotificationDetails}
 												pendingNotificationId={pendingNotificationId}
 												onPrimaryAction={(notificationId) => updateNotification(notificationId, true)}
 												onSecondaryAction={(notificationId) => updateNotification(notificationId, false)}
@@ -404,7 +463,8 @@ export default function Notifications() {
 											<NotificationCard
 												key={item.id}
 												item={item}
-												onOpen={setSelectedNotification}
+												onNavigate={openNotificationRoute}
+												onOpen={openNotificationDetails}
 												pendingNotificationId={pendingNotificationId}
 												onPrimaryAction={(notificationId) => updateNotification(notificationId, true)}
 												onSecondaryAction={(notificationId) => updateNotification(notificationId, false)}
@@ -446,6 +506,7 @@ export default function Notifications() {
 				item={selectedNotification}
 				onClose={() => setSelectedNotification(null)}
 				onToggleRead={updateNotification}
+				onOpenRelated={openNotificationRoute}
 				pendingNotificationId={pendingNotificationId}
 			/>
 		</main>

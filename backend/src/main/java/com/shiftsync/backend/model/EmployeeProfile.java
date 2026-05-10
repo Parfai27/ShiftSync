@@ -40,4 +40,14 @@ public class EmployeeProfile extends BaseEntity {
     private String emergencyContactName;
 
     private String emergencyContactPhone;
+
+    private Boolean notifyScheduleChanges;
+
+    private Boolean notifyCompanyNews;
+
+    private Boolean notifyTeamMessages;
+
+    private Boolean hideProfile;
+
+    private Boolean quietHoursEnabled;
 }

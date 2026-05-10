@@ -45,7 +45,46 @@ public final class SchedulingDtos {
     }
 
     public record ManagerSchedulingActionRequest(
-        @NotNull Long managerId
+        @NotNull(message = "Manager session is required.")
+        Long managerId
+    ) {
+    }
+
+    public record ManualShiftAssignmentRequest(
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotNull(message = "Select an employee to assign.")
+        Long employeeId,
+        @NotNull(message = "Select a shift day.")
+        LocalDate shiftDate,
+        @NotBlank(message = "Select a shift.")
+        String shiftName
+    ) {
+    }
+
+    public record RemoveShiftAssignmentRequest(
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotNull(message = "Select the employee assignment to remove.")
+        Long employeeId,
+        @NotNull(message = "Select a shift day.")
+        LocalDate shiftDate,
+        @NotBlank(message = "Select a shift.")
+        String shiftName
+    ) {
+    }
+
+    public record ReassignShiftAssignmentRequest(
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotNull(message = "Current employee assignment is required.")
+        Long currentEmployeeId,
+        @NotNull(message = "Choose a replacement employee.")
+        Long replacementEmployeeId,
+        @NotNull(message = "Select a shift day.")
+        LocalDate shiftDate,
+        @NotBlank(message = "Select a shift.")
+        String shiftName
     ) {
     }
 

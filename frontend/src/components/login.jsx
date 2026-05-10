@@ -40,6 +40,15 @@ export default function Login() {
 			})
 
 			startTransition(() => {
+				if (payload.role === 'EMPLOYEE' && payload.mustChangePassword) {
+					navigate('/employee-settings', {
+						state: {
+							firstLogin: true,
+							message: 'Please change your temporary password before continuing.',
+						},
+					})
+					return
+				}
 				navigate(resolveDestination(payload.role))
 			})
 		} catch (loginError) {

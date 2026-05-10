@@ -19,7 +19,7 @@ import {
 import { RiGroupLine, RiRadarLine } from 'react-icons/ri'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
-import { resolveProfileImage } from '../../lib/managerWorkspace'
+import { resolveProfileImage, useManagerWorkspace } from '../../lib/managerWorkspace'
 import { clearSession, loadSession } from '../../lib/session'
 import MobileManagerMenu from '../shared/MobileManagerMenu'
 import ManagerProfileMenu from '../shared/ManagerProfileMenu'
@@ -27,8 +27,8 @@ import ThemeToggleButton from '../shared/ThemeToggleButton'
 
 const metricPresentation = {
 	'Total Employees': { icon: RiGroupLine, accent: 'bg-blue-50 text-blue-600' },
-	'Active Shifts': { icon: FiCalendar, accent: 'bg-indigo-50 text-indigo-600' },
-	'Coverage %': { icon: RiRadarLine, accent: 'bg-orange-50 text-orange-600' },
+	'Scheduled Shifts': { icon: FiCalendar, accent: 'bg-indigo-50 text-indigo-600' },
+	'Staffing Coverage': { icon: RiRadarLine, accent: 'bg-orange-50 text-orange-600' },
 	'Pending Adjustments': { icon: FiClock, accent: 'bg-rose-50 text-rose-600' },
 }
 
@@ -36,10 +36,10 @@ const weekLabels = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 const fallbackOverview = {
 	metrics: [
-		{ title: 'Total Employees', value: '0', delta: '--' },
-		{ title: 'Active Shifts', value: '0', delta: '--' },
-		{ title: 'Coverage %', value: '--', delta: '--' },
-		{ title: 'Pending Adjustments', value: '0', delta: '--' },
+		{ title: 'Total Employees', value: '0', delta: '--', note: '' },
+		{ title: 'Scheduled Shifts', value: '0', delta: '--', note: '' },
+		{ title: 'Staffing Coverage', value: '--', delta: '--', note: '' },
+		{ title: 'Pending Adjustments', value: '0', delta: '--', note: '' },
 	],
 	shiftStatuses: [],
 	recentAdjustments: [],
@@ -62,8 +62,20 @@ function resolveMetricAccent(delta) {
 	if (delta === 'Optimal') {
 		return 'bg-orange-50 text-orange-600'
 	}
+	if (delta === 'Healthy') {
+		return 'bg-emerald-50 text-emerald-600'
+	}
 	if (delta === 'Review') {
 		return 'bg-rose-50 text-rose-600'
+	}
+	if (delta === 'Watch') {
+		return 'bg-amber-50 text-amber-700'
+	}
+	if (delta === 'This Window') {
+		return 'bg-indigo-50 text-indigo-600'
+	}
+	if (delta === 'Clear') {
+		return 'bg-emerald-50 text-emerald-600'
 	}
 	return 'bg-blue-50 text-blue-600'
 }
@@ -101,19 +113,26 @@ function resolveAdjustmentTone(status) {
 	return 'bg-rose-50 text-rose-700'
 }
 
-function resolveHeatmapTone(level) {
-	if (level === 'high') {
-		return 'bg-emerald-500'
+function compactShiftLabel(shiftName) {
+	if (!shiftName) {
+		return 'OFF'
 	}
-	if (level === 'medium') {
-		return 'bg-amber-400'
+	if (shiftName.includes('Evening')) {
+		return 'EVE'
 	}
-	return 'bg-rose-300'
+	if (shiftName.includes('1st')) {
+		return '1ST'
+	}
+	if (shiftName.includes('2nd')) {
+		return '2ND'
+	}
+	return shiftName.slice(0, 3).toUpperCase()
 }
 
 export default function Overview() {
 	const navigate = useNavigate()
 	const session = loadSession()
+	const { workspace } = useManagerWorkspace({ rangeDays: 7 })
 	const [overview, setOverview] = useState(fallbackOverview)
 	const [isLoading, setIsLoading] = useState(true)
 	const [error, setError] = useState('')
@@ -179,6 +198,35 @@ export default function Overview() {
 			return matchesSearch && matchesFilter
 		})
 	}, [adjustmentFilter, normalizedSearch, overview.recentAdjustments])
+
+	const weeklyRotaSnapshot = useMemo(() => {
+		const boardDays = workspace.scheduling?.weeklyBoard?.days || []
+		return (workspace.scheduling?.rows || [])
+			.slice(0, 5)
+			.map((employee) => {
+				const days = boardDays.map((day) => {
+					const matchedShift = day.shifts.find((shift) =>
+						shift.roles.some((role) => role.employeeName === employee.name)
+					)
+					const matchedRole = matchedShift?.roles.find((role) => role.employeeName === employee.name)
+					return {
+						day: day.day,
+						date: day.date,
+						shiftLabel: compactShiftLabel(matchedShift?.shiftName),
+						role: matchedRole?.role || '',
+						window: matchedShift?.window || '',
+						assigned: Boolean(matchedShift),
+					}
+				})
+
+				return {
+					name: employee.name,
+					role: employee.role,
+					hours: employee.hours,
+					days,
+				}
+			})
+	}, [workspace.scheduling?.rows, workspace.scheduling?.weeklyBoard?.days])
 
 	function cycleAdjustmentFilter() {
 		setAdjustmentFilter((current) => {
@@ -343,6 +391,7 @@ export default function Overview() {
 											</div>
 											<div className="mt-5 text-sm font-medium text-slate-500">{metric.title}</div>
 											<div className="mt-1 text-3xl font-black tracking-[-0.06em] text-slate-950">{metric.value}</div>
+											{metric.note ? <div className="mt-3 text-xs leading-5 text-slate-500">{metric.note}</div> : null}
 										</article>
 									)
 								})}
@@ -467,29 +516,42 @@ export default function Overview() {
 
 							<div className="space-y-5">
 								<article className="rounded-[26px] border border-slate-200/80 bg-white p-5 sm:p-6">
-									<div className="mb-4 text-[13px] font-extrabold uppercase tracking-[0.22em] text-slate-500">Coverage Heatmap</div>
-									<div className="space-y-3">
-										<div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))] gap-2 text-center text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
-											<span />
-											{weekLabels.map((label) => <span key={label}>{label}</span>)}
+									<div className="mb-4 flex items-center justify-between gap-3">
+										<div>
+											<div className="text-[13px] font-extrabold uppercase tracking-[0.22em] text-slate-500">Mini Rota Snapshot</div>
+											<p className="mt-1 text-sm text-slate-500">A compact weekly duty strip that supports the dashboard without taking it over.</p>
 										</div>
-										{[0, 1].map((row) => (
-											<div key={row} className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))] gap-2">
-												<div className="flex items-center text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
-													{row === 0 ? 'Week 1' : 'Week 2'}
-												</div>
-												{overview.heatmap.slice(row * 7, row * 7 + 7).map((level, index) => (
-													<span key={`${row}-${index}`} className={`aspect-square rounded-lg ${resolveHeatmapTone(level)}`} />
+										<Link className="text-sm font-bold text-[#0f51ff]" to="/scheduling">Open Full Rota</Link>
+									</div>
+									<div className="overflow-x-auto">
+										<table className="min-w-[720px] w-full overflow-hidden rounded-2xl bg-[#f8faff] text-left">
+											<thead className="border-b border-slate-100 text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">
+												<tr>
+													<th className="px-3 py-3">Employee</th>
+													{(workspace.scheduling?.weeklyBoard?.days || []).map((day) => (
+														<th key={day.isoDate} className="px-3 py-3 text-center">{day.day}</th>
+													))}
+												</tr>
+											</thead>
+											<tbody>
+												{weeklyRotaSnapshot.slice(0, 4).map((employee) => (
+													<tr key={employee.name} className="border-b border-slate-100 text-sm text-slate-700 last:border-b-0">
+														<td className="px-3 py-3">
+															<div className="font-bold text-slate-900">{employee.name}</div>
+															<div className="text-[11px] font-medium text-slate-500">{employee.role}</div>
+														</td>
+														{employee.days.map((day) => (
+															<td key={`${employee.name}-${day.day}`} className="px-3 py-3 text-center">
+																<div className={`mx-auto inline-flex min-w-14 justify-center rounded-xl px-2 py-2 text-[11px] font-black tracking-[0.14em] ${day.assigned ? 'bg-blue-50 text-[#0f51ff]' : 'bg-slate-100 text-slate-400'}`}>
+																	{day.shiftLabel}
+																</div>
+															</td>
+														))}
+													</tr>
 												))}
-											</div>
-										))}
+											</tbody>
+										</table>
 									</div>
-									<div className="mt-4 flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-500">
-										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-emerald-500" />Fully covered</span>
-										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-amber-400" />Partial coverage</span>
-										<span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-rose-300" />Gap risk</span>
-									</div>
-									<p className="mt-4 text-sm leading-6 text-slate-500">Use this view to spot weak coverage patterns quickly across the two-week schedule window.</p>
 								</article>
 
 								<article className="rounded-[26px] bg-[#0f51ff] p-5 text-white sm:p-6">

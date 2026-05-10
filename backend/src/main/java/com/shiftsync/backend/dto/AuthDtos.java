@@ -24,6 +24,13 @@ public final class AuthDtos {
     ) {
     }
 
+    public record ChangePasswordRequest(
+        Long userId,
+        @NotBlank String currentPassword,
+        @NotBlank String newPassword
+    ) {
+    }
+
     public record AuthResponse(
         Long userId,
         String fullName,
@@ -32,6 +39,7 @@ public final class AuthDtos {
         Role role,
         Long branchId,
         String profileImageUrl,
+        boolean mustChangePassword,
         String message
     ) {
     }
