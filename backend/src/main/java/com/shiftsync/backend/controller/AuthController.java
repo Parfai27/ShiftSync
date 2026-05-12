@@ -2,6 +2,7 @@ package com.shiftsync.backend.controller;
 
 import com.shiftsync.backend.dto.AuthDtos.AuthResponse;
 import com.shiftsync.backend.dto.AuthDtos.ChangePasswordRequest;
+import com.shiftsync.backend.dto.AuthDtos.ForgotPasswordRequest;
 import com.shiftsync.backend.dto.AuthDtos.LoginRequest;
 import com.shiftsync.backend.dto.AuthDtos.RegisterRequest;
 import com.shiftsync.backend.service.AuthService;
@@ -35,5 +36,11 @@ public class AuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         authService.changePassword(request);
+    }
+
+    @PostMapping("/forgot-password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request);
     }
 }

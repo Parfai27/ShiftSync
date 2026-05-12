@@ -40,6 +40,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,6 +63,7 @@ public class SchedulingService {
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;
     private final EmployeeProfileRepository employeeProfileRepository;
+    private final CredentialEmailService credentialEmailService;
 
     public List<Shift> getShifts() {
         return shiftRepository.findAll();
@@ -202,6 +204,7 @@ public class SchedulingService {
             .orElseThrow(() -> new IllegalArgumentException("No available employee could be assigned to the next open shift"));
 
         assignEmployeeToShift(manager, employee, shift, "Assigned available staff to understaffed shift");
+        sendWeeklyAssignmentSummaryIfAvailable(employee, shift.getShiftDate());
         return shiftRepository.save(shift);
     }
 
@@ -225,6 +228,8 @@ public class SchedulingService {
             }
             shiftRepository.save(shift);
         }
+
+        sendWeeklyAssignmentSummariesForBranch(manager, openShifts);
 
         logAudit(manager, "Ran auto schedule", "Scheduling", "Auto scheduling processed " + openShifts.size() + " shift(s).");
         return openShifts;
@@ -260,6 +265,7 @@ public class SchedulingService {
         }
 
         assignEmployeeToShift(manager, employee, shift, "Assigned employee manually to selected shift");
+        sendWeeklyAssignmentSummaryIfAvailable(employee, shift.getShiftDate());
         return shiftRepository.save(shift);
     }
 
@@ -297,6 +303,7 @@ public class SchedulingService {
             "Scheduling",
             employee.getFullName() + " removed from " + shift.getName() + " on " + shift.getShiftDate() + "."
         );
+        sendWeeklyAssignmentSummaryIfAvailable(employee, shift.getShiftDate());
         return shift;
     }
 
@@ -366,6 +373,8 @@ public class SchedulingService {
             "Scheduling",
             "Moved " + shift.getName() + " on " + shift.getShiftDate() + " from " + currentEmployee.getFullName() + " to " + replacementEmployee.getFullName() + "."
         );
+        sendWeeklyAssignmentSummaryIfAvailable(currentEmployee, shift.getShiftDate());
+        sendWeeklyAssignmentSummaryIfAvailable(replacementEmployee, shift.getShiftDate());
         return shift;
     }
 
@@ -470,6 +479,75 @@ public class SchedulingService {
         );
 
         logAudit(manager, action, "Scheduling", employee.getFullName() + " assigned to " + shift.getName() + " on " + shift.getShiftDate() + ".");
+    }
+
+    private void sendWeeklyAssignmentSummariesForBranch(User manager, List<Shift> shifts) {
+        if (shifts == null || shifts.isEmpty()) {
+            return;
+        }
+
+        LocalDate weekReference = shifts.stream()
+            .map(Shift::getShiftDate)
+            .min(LocalDate::compareTo)
+            .orElse(LocalDate.now());
+
+        List<User> branchEmployeesWithAssignments = shiftAssignmentRepository.findAll().stream()
+            .filter(item -> item.getShift() != null && item.getShift().getBranch() != null)
+            .filter(item -> manager.getBranch() != null && item.getShift().getBranch().getId().equals(manager.getBranch().getId()))
+            .filter(item -> isWithinScheduleWeek(item.getShift().getShiftDate(), weekReference))
+            .map(ShiftAssignment::getEmployee)
+            .filter(User::isActive)
+            .distinct()
+            .toList();
+
+        for (User employee : branchEmployeesWithAssignments) {
+            sendWeeklyAssignmentSummaryIfAvailable(employee, weekReference);
+        }
+    }
+
+    private void sendWeeklyAssignmentSummaryIfAvailable(User employee, LocalDate referenceDate) {
+        if (employee == null || employee.getEmail() == null || employee.getEmail().isBlank()) {
+            return;
+        }
+
+        LocalDate weekStart = referenceDate.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+        LocalDate weekEnd = weekStart.plusDays(6);
+
+        List<ShiftAssignment> weeklyAssignments = shiftAssignmentRepository.findByEmployeeId(employee.getId()).stream()
+            .filter(item -> item.getShift() != null)
+            .filter(item -> !item.getShift().getShiftDate().isBefore(weekStart) && !item.getShift().getShiftDate().isAfter(weekEnd))
+            .sorted(Comparator.comparing((ShiftAssignment item) -> item.getShift().getShiftDate()).thenComparing(item -> item.getShift().getStartTime()))
+            .collect(Collectors.toList());
+
+        if (weeklyAssignments.isEmpty()) {
+            return;
+        }
+
+        boolean sent = credentialEmailService.sendWeeklyShiftAssignmentSummary(
+            employee.getEmail(),
+            employee.getFullName(),
+            weeklyAssignments
+        );
+
+        if (!sent) {
+            return;
+        }
+
+        notificationRepository.save(
+            Notification.builder()
+                .title("Weekly shift summary sent")
+                .message("Your weekly shift assignment summary was emailed for the week of " + weekStart + ".")
+                .priority(NotificationPriority.MEDIUM)
+                .recipient(employee)
+                .read(false)
+                .build()
+        );
+    }
+
+    private boolean isWithinScheduleWeek(LocalDate shiftDate, LocalDate referenceDate) {
+        LocalDate weekStart = referenceDate.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+        LocalDate weekEnd = weekStart.plusDays(6);
+        return !shiftDate.isBefore(weekStart) && !shiftDate.isAfter(weekEnd);
     }
 
     private void logAudit(User actor, String action, String targetModule, String details) {

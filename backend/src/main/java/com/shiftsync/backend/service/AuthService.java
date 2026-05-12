@@ -2,6 +2,7 @@ package com.shiftsync.backend.service;
 
 import com.shiftsync.backend.dto.AuthDtos.AuthResponse;
 import com.shiftsync.backend.dto.AuthDtos.ChangePasswordRequest;
+import com.shiftsync.backend.dto.AuthDtos.ForgotPasswordRequest;
 import com.shiftsync.backend.model.AuditLog;
 import com.shiftsync.backend.dto.AuthDtos.LoginRequest;
 import com.shiftsync.backend.dto.AuthDtos.RegisterRequest;
@@ -12,6 +13,7 @@ import com.shiftsync.backend.repository.AuditLogRepository;
 import com.shiftsync.backend.repository.BranchRepository;
 import com.shiftsync.backend.repository.UserRepository;
 import java.time.LocalDateTime;
+import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,7 @@ public class AuthService {
     private final BranchRepository branchRepository;
     private final AuditLogRepository auditLogRepository;
     private final PasswordEncoder passwordEncoder;
+    private final CredentialEmailService credentialEmailService;
 
     public AuthResponse login(LoginRequest request) {
         User user = userRepository.findByEmail(request.email()).orElse(null);
@@ -106,6 +109,39 @@ public class AuthService {
         logLoginActivity(user, "Password changed", "User changed account password");
     }
 
+    public void forgotPassword(ForgotPasswordRequest request) {
+        String normalizedEmail = request.email().trim().toLowerCase(Locale.ENGLISH);
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+
+        if (user == null) {
+            logLoginActivity(null, "Password reset requested", "Password reset requested for unknown email: " + normalizedEmail);
+            return;
+        }
+
+        String temporaryPassword = generateTemporaryPassword(user);
+        user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
+        user.setMustChangePassword(true);
+        userRepository.save(user);
+
+        boolean emailSent = credentialEmailService.sendForgotPasswordInstructions(
+            user.getEmail(),
+            user.getFullName(),
+            temporaryPassword
+        );
+
+        logLoginActivity(
+            user,
+            emailSent ? "Password reset emailed" : "Password reset generated",
+            emailSent
+                ? "Temporary password instructions emailed to " + user.getEmail()
+                : "Temporary password generated, but email delivery failed for " + user.getEmail()
+        );
+
+        if (!emailSent) {
+            throw new IllegalArgumentException("Password reset instructions could not be emailed right now. Please try again later.");
+        }
+    }
+
     private void logLoginActivity(User actor, String action, String details) {
         auditLogRepository.save(
             AuditLog.builder()
@@ -116,5 +152,12 @@ public class AuthService {
                 .details(details)
                 .build()
         );
+    }
+
+    private String generateTemporaryPassword(User user) {
+        String seed = user.getFullName() == null ? "ShiftSync" : user.getFullName().replaceAll("[^A-Za-z]", "");
+        String prefix = seed.isBlank() ? "ShiftSync" : seed.substring(0, Math.min(4, seed.length()));
+        String suffix = String.valueOf(System.currentTimeMillis());
+        return prefix + "@" + suffix.substring(Math.max(0, suffix.length() - 6));
     }
 }

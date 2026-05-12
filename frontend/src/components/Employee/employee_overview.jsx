@@ -31,6 +31,9 @@ const weekDays = [
 const fallbackOverview = {
 	employeeName: 'Employee',
 	roleLabel: 'EMPLOYEE',
+	managerName: 'Manager on duty',
+	managerRoleLabel: 'MANAGER',
+	managerProfileImageUrl: '',
 	stats: [],
 	schedule: [],
 	notifications: [],
@@ -46,6 +49,15 @@ function resolveGreetingLabel() {
 		return 'Good Afternoon'
 	}
 	return 'Good Evening'
+}
+
+function buildInitials(name) {
+	return (name || 'Manager')
+		.split(' ')
+		.map((part) => part[0])
+		.join('')
+		.slice(0, 2)
+		.toUpperCase()
 }
 
 export default function EmployeeOverview() {
@@ -136,6 +148,7 @@ export default function EmployeeOverview() {
 	}, [normalizedSearch, overview.resources])
 
 	const hasAssignedDashboardData = overview.stats.length > 0 || overview.schedule.length > 0
+	const managerInitials = useMemo(() => buildInitials(overview.managerName), [overview.managerName])
 
 	async function requestTimeOff() {
 		if (!session?.userId) {
@@ -376,10 +389,16 @@ export default function EmployeeOverview() {
 								<article className="overflow-hidden rounded-[20px] bg-[#0f51ff] p-4 text-white sm:p-5">
 									<div className="text-[10px] font-bold uppercase tracking-[0.24em] text-blue-100">Manager On Duty</div>
 									<div className="mt-4 flex items-center gap-3">
-										<div className="h-11 w-11 overflow-hidden rounded-full border border-white/30" />
+										<div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/30 bg-white/15 text-sm font-extrabold text-white">
+											{overview.managerProfileImageUrl ? (
+												<img alt={overview.managerName} className="h-full w-full object-cover" src={overview.managerProfileImageUrl} />
+											) : (
+												managerInitials
+											)}
+										</div>
 										<div>
-											<div className="text-lg font-extrabold">Aline Uwimana</div>
-											<div className="text-xs text-blue-100">Pharmacy Operations Manager</div>
+											<div className="text-lg font-extrabold">{overview.managerName}</div>
+											<div className="text-xs text-blue-100">{overview.managerRoleLabel}</div>
 										</div>
 									</div>
 									<div className="mt-4 space-y-2">

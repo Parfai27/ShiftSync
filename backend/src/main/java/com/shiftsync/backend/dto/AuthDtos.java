@@ -31,6 +31,11 @@ public final class AuthDtos {
     ) {
     }
 
+    public record ForgotPasswordRequest(
+        @NotBlank String email
+    ) {
+    }
+
     public record AuthResponse(
         Long userId,
         String fullName,

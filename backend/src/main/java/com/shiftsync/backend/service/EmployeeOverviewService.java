@@ -90,6 +90,7 @@ public class EmployeeOverviewService {
 
     public EmployeeOverviewResponse getEmployeeOverview(Long userId) {
         User employee = requireEmployee(userId);
+        User manager = findBranchManager(employee);
 
         List<ShiftAssignment> assignments = shiftAssignmentRepository.findByEmployeeId(userId).stream()
             .sorted(Comparator.comparing(item -> item.getShift().getShiftDate()))
@@ -120,7 +121,7 @@ public class EmployeeOverviewService {
                     shift.getStartTime().toString(),
                     slot,
                     shift.getName(),
-                    "Ngabo Pharmacy Shift - " + shift.getRequiredStaff() + " staff required",
+                    buildOverviewShiftSubtitle(employee, shift),
                     shift.getShiftDate().getDayOfWeek().name().substring(0, 3),
                     shift.getShiftDate().format(dateFormatter)
                 );
@@ -137,6 +138,9 @@ public class EmployeeOverviewService {
         return new EmployeeOverviewResponse(
             employee.getFullName(),
             employee.getRole().name().replace('_', ' '),
+            manager != null ? manager.getFullName() : "Manager on duty",
+            manager != null ? manager.getRole().name().replace('_', ' ') : "MANAGER",
+            manager != null ? manager.getProfileImageUrl() : null,
             stats,
             schedule,
             notifications,
@@ -815,6 +819,13 @@ public class EmployeeOverviewService {
         return new EmployeeNotificationItem(title, detail, when, active);
     }
 
+    private String buildOverviewShiftSubtitle(User employee, Shift shift) {
+        String pharmacyLabel = employee.getBranch() != null && employee.getBranch().getName() != null
+            ? employee.getBranch().getName()
+            : "Pharmacy shift";
+        return pharmacyLabel + " - " + shift.getRequiredStaff() + " staff required";
+    }
+
     private String resolveNotificationKind(Notification notification) {
         String title = notification.getTitle() == null ? "" : notification.getTitle().toLowerCase();
         String message = notification.getMessage() == null ? "" : notification.getMessage().toLowerCase();
@@ -1056,15 +1067,7 @@ public class EmployeeOverviewService {
     }
 
     private void notifyBranchManager(User employee, String title, String message) {
-        if (employee.getBranch() == null) {
-            return;
-        }
-        User manager = userRepository.findByRole(com.shiftsync.backend.model.Role.MANAGER).stream()
-            .filter(User::isActive)
-            .filter(item -> item.getBranch() != null && item.getBranch().getId().equals(employee.getBranch().getId()))
-            .findFirst()
-            .orElse(null);
-
+        User manager = findBranchManager(employee);
         if (manager == null) {
             return;
         }
@@ -1078,5 +1081,17 @@ public class EmployeeOverviewService {
                 .read(false)
                 .build()
         );
+    }
+
+    private User findBranchManager(User employee) {
+        if (employee.getBranch() == null) {
+            return null;
+        }
+
+        return userRepository.findByRole(com.shiftsync.backend.model.Role.MANAGER).stream()
+            .filter(User::isActive)
+            .filter(item -> item.getBranch() != null && item.getBranch().getId().equals(employee.getBranch().getId()))
+            .findFirst()
+            .orElse(null);
     }
 }

@@ -4,7 +4,6 @@ import {
 	FiChevronDown,
 	FiClock,
 	FiDownload,
-	FiFilter,
 	FiHome,
 	FiLayers,
 	FiLogOut,
@@ -16,10 +15,9 @@ import {
 	FiSliders,
 	FiUsers,
 	FiMenu,
-	FiRefreshCw,
 } from 'react-icons/fi'
 import { RiGroupLine, RiRadarLine } from 'react-icons/ri'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { clearSession } from '../../lib/session'
 import { resolveProfileImage, useManagerWorkspace } from '../../lib/managerWorkspace'
@@ -83,86 +81,55 @@ function buildTrendSeries(attendanceBars, weekLabels, period) {
 	}))
 }
 
-function buildTrendPath(series, width = 560, height = 260) {
-	if (!series.length) {
-		return ''
-	}
-
-	const step = series.length > 1 ? width / (series.length - 1) : width
-
-	return series
-		.map((item, index) => {
-			const x = index * step
-			const y = height - (Math.max(0, Math.min(100, item.value)) / 100) * height
-			return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
-		})
-		.join(' ')
-}
-
 function clampPercent(value) {
 	return Math.max(0, Math.min(100, value || 0))
 }
 
+function toneToHex(tone) {
+	if ((tone || '').includes('0f51ff')) return '#2563eb'
+	if ((tone || '').includes('5a6fc3')) return '#8da2ff'
+	return '#cbd5e1'
+}
+
+function complianceStatusClasses(status, danger) {
+	if (danger) {
+		return 'bg-rose-50 text-rose-600 border border-rose-200'
+	}
+	if (status === 'Completed') {
+		return 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+	}
+	if (status === 'Today') {
+		return 'bg-amber-50 text-amber-700 border border-amber-200'
+	}
+	return 'bg-[#eef3ff] text-[#0f51ff] border border-[#d7e3ff]'
+}
+
 export default function Reports() {
 	const navigate = useNavigate()
-	const { manager, workspace, isLoading, error, reloadWorkspace } = useManagerWorkspace()
+	const { manager, workspace, isLoading, error } = useManagerWorkspace()
 	const profileImage = resolveProfileImage(manager?.profileImageUrl, manager?.fullName)
 	const reports = workspace.reports
 	const [searchTerm, setSearchTerm] = useState('')
-	const [period, setPeriod] = useState('30')
-	const [filterMode, setFilterMode] = useState('ALL')
 	const [selectedLog, setSelectedLog] = useState(null)
 	const [exportLabel, setExportLabel] = useState('')
 	const [showAllLogs, setShowAllLogs] = useState(false)
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-	const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
-	const exportMenuRef = useRef(null)
 
 	const normalizedSearch = searchTerm.trim().toLowerCase()
 	const metricsToShow = useMemo(() => {
-		const periodMetrics = period === '90'
-			? reports.metrics.map((item) => ({
-				...item,
-				delta: item.delta === 'Stable' ? 'Quarterly' : item.delta,
-			}))
-			: reports.metrics
-
-		return periodMetrics.filter((item) => {
+		return reports.metrics.filter((item) => {
 			if (!normalizedSearch) {
 				return true
 			}
 
 			return [item.title, item.value, item.delta].join(' ').toLowerCase().includes(normalizedSearch)
 		})
-	}, [normalizedSearch, period, reports.metrics])
+	}, [normalizedSearch, reports.metrics])
 
 	const trendSeries = useMemo(
-		() => buildTrendSeries(reports.attendanceBars, reports.weekLabels, period),
-		[period, reports.attendanceBars, reports.weekLabels]
+		() => buildTrendSeries(reports.attendanceBars, reports.weekLabels, '30'),
+		[reports.attendanceBars, reports.weekLabels]
 	)
-	const trendSummary = useMemo(() => {
-		if (!trendSeries.length) {
-			return {
-				average: 0,
-				best: null,
-				lowest: null,
-				delta: 0,
-			}
-		}
-
-		const average = Math.round(trendSeries.reduce((sum, item) => sum + item.value, 0) / trendSeries.length)
-		const best = trendSeries.reduce((current, item) => (item.value > current.value ? item : current), trendSeries[0])
-		const lowest = trendSeries.reduce((current, item) => (item.value < current.value ? item : current), trendSeries[0])
-		const delta = trendSeries.length > 1 ? trendSeries[trendSeries.length - 1].value - trendSeries[0].value : 0
-
-		return {
-			average,
-			best,
-			lowest,
-			delta,
-		}
-	}, [trendSeries])
-
 	const filteredDistribution = useMemo(() => {
 		return reports.distribution.filter((item) => {
 			return !normalizedSearch || item.label.toLowerCase().includes(normalizedSearch)
@@ -180,58 +147,13 @@ export default function Reports() {
 				row.status,
 			].join(' ').toLowerCase().includes(normalizedSearch)
 
-			const matchesFilter =
-				filterMode === 'ALL' ||
-				(filterMode === 'REVIEW' && row.danger) ||
-				(filterMode === 'SCHEDULED' && !row.danger)
-
-			return matchesSearch && matchesFilter
+			return matchesSearch
 		})
-	}, [filterMode, normalizedSearch, reports.recentCompliance])
+	}, [normalizedSearch, reports.recentCompliance])
 
 	const visibleCompliance = useMemo(() => {
 		return showAllLogs ? filteredCompliance : filteredCompliance.slice(0, 5)
 	}, [filteredCompliance, showAllLogs])
-
-	const reportSummary = useMemo(() => {
-		if (period === '365') {
-			return 'Yearly view of pharmacy staffing coverage, assignment compliance, and workload balance.'
-		}
-		if (period === '90') {
-			return 'Quarterly performance trend for live staffing activity, schedule coverage, and operational risk.'
-		}
-		return reports.summary || 'Loading report data...'
-	}, [period, reports.summary])
-
-	useEffect(() => {
-		function handleClickOutside(event) {
-			if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
-				setIsExportMenuOpen(false)
-			}
-		}
-
-		function handleEscape(event) {
-			if (event.key === 'Escape') {
-				setIsExportMenuOpen(false)
-			}
-		}
-
-		document.addEventListener('mousedown', handleClickOutside)
-		document.addEventListener('keydown', handleEscape)
-
-		return () => {
-			document.removeEventListener('mousedown', handleClickOutside)
-			document.removeEventListener('keydown', handleEscape)
-		}
-	}, [])
-
-	function cycleFilter() {
-		setFilterMode((current) => {
-			if (current === 'ALL') return 'REVIEW'
-			if (current === 'REVIEW') return 'SCHEDULED'
-			return 'ALL'
-		})
-	}
 
 	function buildExportRows() {
 		return [
@@ -245,11 +167,10 @@ export default function Reports() {
 		const url = URL.createObjectURL(blob)
 		const link = document.createElement('a')
 		link.href = url
-		link.download = `reports-${period}-${filterMode.toLowerCase()}.${extension}`
+		link.download = `reports-analytics.${extension}`
 		link.click()
 		URL.revokeObjectURL(url)
 		setExportLabel(`Snapshot exported as ${extension.toUpperCase()}.`)
-		setIsExportMenuOpen(false)
 		window.setTimeout(() => setExportLabel(''), 2000)
 	}
 
@@ -259,14 +180,6 @@ export default function Reports() {
 			.map((row) => row.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(','))
 			.join('\n')
 		downloadFile(csv, 'text/csv;charset=utf-8;', 'csv')
-	}
-
-	function exportExcel() {
-		const rows = buildExportRows()
-		const tsv = rows
-			.map((row) => row.map((value) => String(value ?? '').replace(/\t/g, ' ')).join('\t'))
-			.join('\n')
-		downloadFile(tsv, 'application/vnd.ms-excel;charset=utf-8;', 'xls')
 	}
 
 	function exportSnapshot() {
@@ -310,176 +223,131 @@ export default function Reports() {
 					</header>
 
 					<div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
-						<section className="space-y-6">
-							<div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-								<div>
-									<h1 className="text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-4xl">Reports &amp; Analytics</h1>
-									<p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">{reportSummary}</p>
-								</div>
-								<div className="flex flex-wrap items-center gap-3">
-									<div className="inline-flex rounded-2xl bg-[#f3f6ff] p-1 text-sm font-semibold text-slate-500">
-										<button className={`rounded-xl px-4 py-2 ${period === '30' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setPeriod('30')} type="button">Last 30 Days</button>
-										<button className={`rounded-xl px-4 py-2 ${period === '90' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setPeriod('90')} type="button">Quarterly</button>
-										<button className={`rounded-xl px-4 py-2 ${period === '365' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setPeriod('365')} type="button">Yearly</button>
-									</div>
-									<button className="inline-flex items-center gap-2 rounded-2xl bg-[#e8eeff] px-4 py-3 text-sm font-bold text-slate-700" onClick={cycleFilter} type="button"><FiFilter className="h-4 w-4" /> {filterMode}</button>
-									<button className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-700" onClick={reloadWorkspace} type="button"><FiRefreshCw className="h-4 w-4" /> Refresh</button>
-									<div className="relative" ref={exportMenuRef}>
-										<button aria-expanded={isExportMenuOpen} aria-haspopup="menu" className="inline-flex items-center gap-2 rounded-2xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white" onClick={() => setIsExportMenuOpen((current) => !current)} type="button"><FiDownload className="h-4 w-4" /> Export <FiChevronDown className={`h-4 w-4 transition ${isExportMenuOpen ? 'rotate-180' : ''}`} /></button>
-										{isExportMenuOpen ? (
-											<div className="absolute right-0 top-[calc(100%+10px)] z-30 min-w-[170px] rounded-2xl border border-slate-200/80 bg-white p-2 shadow-[0_18px_45px_rgba(15,23,42,0.12)]">
-												<button className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-[#eef3ff] hover:text-[#0f51ff]" onClick={exportCsv} type="button">
-													<span>Download CSV</span>
-													<span className="text-[11px] uppercase tracking-[0.16em] text-slate-400">.csv</span>
-												</button>
-												<button className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-[#eef3ff] hover:text-[#0f51ff]" onClick={exportExcel} type="button">
-													<span>Download Excel</span>
-													<span className="text-[11px] uppercase tracking-[0.16em] text-slate-400">.xls</span>
-												</button>
-											</div>
-										) : null}
-									</div>
-								</div>
-							</div>
+						<section className="space-y-5">
 							{error ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div> : null}
 							{exportLabel ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{exportLabel}</div> : null}
-							<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metricsToShow.map((item) => <MetricCard key={item.title} item={item} />)}</div>
-							{!metricsToShow.length && !isLoading ? <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-500">No metrics matched the current search.</div> : null}
-							<div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-								<div className="rounded-[26px] border border-slate-200/80 bg-white p-5 sm:p-6">
-									<div>
-										<h2 className="text-xl font-black tracking-[-0.04em] text-slate-950">Attendance Trends</h2>
-										<p className="mt-1 text-sm text-slate-500">
-											{period === '30' ? 'Daily shift coverage over the current schedule window.' : period === '90' ? 'Monthly average coverage for the current quarter.' : 'Quarter-by-quarter staffing coverage for the active year.'}
-										</p>
-									</div>
-									<div className="mt-6 rounded-[22px] bg-[#f8faff] p-4 sm:p-5">
-										<div className="mb-4 grid gap-3 md:grid-cols-3">
-											<div className="rounded-2xl bg-white px-4 py-4">
-												<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Average Coverage</div>
-												<div className="mt-2 text-3xl font-black tracking-[-0.06em] text-slate-950">{trendSummary.average}%</div>
-												<div className="mt-1 text-xs font-semibold text-slate-500">Across the selected reporting window</div>
-											</div>
-											<div className="rounded-2xl bg-white px-4 py-4">
-												<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Best Period</div>
-												<div className="mt-2 text-3xl font-black tracking-[-0.06em] text-emerald-600">{trendSummary.best?.value ?? 0}%</div>
-												<div className="mt-1 text-xs font-semibold text-slate-500">{trendSummary.best?.label || 'No data'}</div>
-											</div>
-											<div className="rounded-2xl bg-white px-4 py-4">
-												<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Trend Direction</div>
-												<div className={`mt-2 text-3xl font-black tracking-[-0.06em] ${trendSummary.delta >= 0 ? 'text-[#0f51ff]' : 'text-rose-600'}`}>
-													{trendSummary.delta >= 0 ? '+' : ''}{trendSummary.delta}%
-												</div>
-												<div className="mt-1 text-xs font-semibold text-slate-500">Change from first to latest point</div>
-											</div>
+
+							<div className="grid gap-4 xl:grid-cols-3">
+								{metricsToShow.map((item) => (
+									<article key={item.title} className="rounded-[24px] border border-slate-200/80 bg-white px-6 py-5 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+										<div className="text-[14px] font-medium text-slate-500">{item.title}</div>
+										<div className="mt-3 flex items-end gap-3">
+											<div className="text-5xl font-black tracking-[-0.06em] text-slate-950">{item.value}</div>
+											<div className={`${item.delta.startsWith('-') ? 'text-rose-400' : 'text-emerald-400'} pb-1 text-lg font-semibold`}>{item.delta}</div>
 										</div>
+									</article>
+								))}
+							</div>
+							{!metricsToShow.length && !isLoading ? <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-500">No metrics matched the current search.</div> : null}
+
+							<div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+								<div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_20px_45px_rgba(15,23,42,0.08)] sm:p-6">
+									<h2 className="text-[18px] font-semibold text-slate-950">Coverage Bar Chart</h2>
+									<div className="mt-6 rounded-[24px] border border-slate-200/80 bg-[#f8faff] p-4">
 										<div className="grid grid-cols-[42px_minmax(0,1fr)] gap-4">
-											<div className="flex h-80 flex-col justify-between pb-10 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+											<div className="flex h-[250px] flex-col justify-between text-[11px] font-bold text-slate-400">
 												<span>100</span>
 												<span>75</span>
 												<span>50</span>
 												<span>25</span>
 												<span>0</span>
 											</div>
-											<div className="relative">
-												<svg className="h-80 w-full" viewBox="0 0 560 260" preserveAspectRatio="none">
-													<line x1="0" y1="0" x2="560" y2="0" stroke="#dbe4ff" strokeDasharray="4 4" />
-													<line x1="0" y1="65" x2="560" y2="65" stroke="#e5e7eb" />
-													<line x1="0" y1="130" x2="560" y2="130" stroke="#e5e7eb" />
-													<line x1="0" y1="195" x2="560" y2="195" stroke="#e5e7eb" />
-													<line x1="0" y1="260" x2="560" y2="260" stroke="#e5e7eb" />
-													<line x1="0" y1="26" x2="560" y2="26" stroke="#10b981" strokeDasharray="6 6" />
+											<div>
+												<svg className="h-[250px] w-full" viewBox="0 0 620 250" preserveAspectRatio="none">
+													<line x1="0" y1="0" x2="620" y2="0" stroke="#dbe4ff" />
+													<line x1="0" y1="62.5" x2="620" y2="62.5" stroke="#e5e7eb" />
+													<line x1="0" y1="125" x2="620" y2="125" stroke="#e5e7eb" />
+													<line x1="0" y1="187.5" x2="620" y2="187.5" stroke="#e5e7eb" />
+													<line x1="0" y1="250" x2="620" y2="250" stroke="#dbe4ff" />
 													{trendSeries.map((item, index) => {
-														const step = trendSeries.length > 1 ? 560 / (trendSeries.length - 1) : 560
-														const x = trendSeries.length > 1 ? step * index : 280
-														const barWidth = Math.min(44, Math.max(28, step * 0.45))
-														const height = (clampPercent(item.value) / 100) * 260
-														const y = 260 - height
-														return (
-															<rect
-																key={`${item.label}-bar`}
-																x={x - barWidth / 2}
-																y={y}
-																width={barWidth}
-																height={height}
-																rx="12"
-																fill={item.value >= 90 ? 'rgba(16,185,129,0.18)' : item.value >= 75 ? 'rgba(15,81,255,0.18)' : 'rgba(244,63,94,0.18)'}
-															/>
-														)
-													})}
-													<path d={`${buildTrendPath(trendSeries, 560, 260)} L 560 260 L 0 260 Z`} fill="rgba(15,81,255,0.10)" />
-													<path d={buildTrendPath(trendSeries, 560, 260)} fill="none" stroke="#0f51ff" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
-													{trendSeries.map((item, index) => {
-														const x = trendSeries.length > 1 ? (560 / (trendSeries.length - 1)) * index : 280
-														const y = 260 - (clampPercent(item.value) / 100) * 260
+														const step = 620 / Math.max(trendSeries.length, 1)
+														const barWidth = Math.min(56, Math.max(40, step * 0.54))
+														const x = index * step + (step - barWidth) / 2
+														const healthyHeight = (clampPercent(item.value) / 100) * 250
+														const gapPercent = Math.max(0, 100 - item.value)
+														const gapHeight = (gapPercent / 100) * 250
+														const healthyY = 250 - healthyHeight
+														const gapY = healthyY - gapHeight
 														return (
 															<g key={item.label}>
-																<circle cx={x} cy={y} r="6" fill="#0f51ff" />
-																<circle cx={x} cy={y} r="12" fill="rgba(15,81,255,0.12)" />
-																<text x={x} y={Math.max(16, y - 14)} textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="800">
-																	{item.value}%
-																</text>
+																<rect x={x} y={healthyY} width={barWidth} height={healthyHeight} rx="14" fill="#f8fafc" />
+																{gapHeight > 0 ? <rect x={x} y={gapY} width={barWidth} height={gapHeight} rx="14" fill="#2563eb" /> : null}
+																<text x={x + barWidth / 2} y={healthyY + healthyHeight / 2 + 6} textAnchor="middle" fill="#111827" fontSize="14" fontWeight="700">{item.value}%</text>
+																{gapHeight > 22 ? (
+																	<text x={x + barWidth / 2} y={gapY + Math.min(18, gapHeight / 2 + 4)} textAnchor="middle" fill="#dbeafe" fontSize="13" fontWeight="700">
+																		{gapPercent}%
+																	</text>
+																) : null}
 															</g>
 														)
 													})}
 												</svg>
-												<div className="mb-3 flex flex-wrap items-center gap-3 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
-													<div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#0f51ff]" /> Coverage trend</div>
-													<div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> 90% target</div>
-													<div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-400" /> At-risk periods</div>
-												</div>
-												<div className="mt-3 grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(trendSeries.length, 1)}, minmax(0, 1fr))` }}>
+												<div className="mt-4 grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(trendSeries.length, 1)}, minmax(0, 1fr))` }}>
 													{trendSeries.map((item) => (
-														<div key={item.label} className="text-center">
-															<div className={`text-sm font-black ${item.value >= 90 ? 'text-emerald-600' : item.value >= 75 ? 'text-slate-900' : 'text-rose-600'}`}>{item.value}%</div>
-															<div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-500">{item.label}</div>
+														<div key={item.label} className="text-center text-sm">
+															<div className="text-slate-500">{item.label}</div>
 														</div>
 													))}
 												</div>
-												<div className="mt-4 grid gap-3 md:grid-cols-2">
-													<div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-600">
-														<span className="font-bold text-slate-900">Lowest coverage:</span>{' '}
-														{trendSummary.lowest ? `${trendSummary.lowest.label} at ${trendSummary.lowest.value}%` : 'No data'}
-													</div>
-													<div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-600">
-														<span className="font-bold text-slate-900">Target:</span> Keep coverage at or above 90% for a stable weekly rota.
-													</div>
+												<div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-sm text-slate-500">
+													<div className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-[#2563eb]" /> Healthy</div>
+													<div className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-[#f8fafc]" /> Watch</div>
+													<div className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-[#94a3b8]" /> Gap</div>
 												</div>
 											</div>
 										</div>
 									</div>
 								</div>
-								<div className="rounded-[26px] border border-slate-200/80 bg-[#eef3ff] p-5 sm:p-6">
-									<h2 className="text-xl font-black tracking-[-0.04em] text-slate-950">Department Coverage</h2>
-									<p className="mt-1 text-sm text-slate-500">Clear breakdown of how the active team is distributed.</p>
-									<div className="mt-6 rounded-[22px] bg-white px-5 py-4">
-										<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Overall coverage</div>
-										<div className="mt-2 flex items-end justify-between gap-3">
-											<div className="text-3xl font-black tracking-[-0.06em] text-slate-950">{reports.capacityPercent}%</div>
-											<div className="text-sm font-semibold text-slate-500">of required staffing filled</div>
-										</div>
-										<div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
-											<div className="h-full rounded-full bg-[linear-gradient(90deg,#0f51ff_0%,#7aa2ff_100%)]" style={{ width: `${reports.capacityPercent}%` }} />
-										</div>
+
+								<div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_20px_45px_rgba(15,23,42,0.08)] sm:p-6">
+									<h2 className="text-[18px] font-semibold text-slate-950">Department &amp; Team Mix</h2>
+									<div className="mt-6 flex items-center justify-center">
+										<svg viewBox="0 0 240 240" className="h-56 w-56">
+											<circle cx="120" cy="120" r="76" fill="none" stroke="#e5e7eb" strokeWidth="24" />
+											{(() => {
+												const total = Math.max(1, filteredDistribution.reduce((sum, item) => sum + item.value, 0))
+												const circumference = 2 * Math.PI * 76
+												const segments = filteredDistribution.reduce((acc, item) => {
+													const dash = circumference * (item.value / total)
+													acc.items.push(
+														<circle
+															key={item.label}
+															cx="120"
+															cy="120"
+															r="76"
+															fill="none"
+															stroke={toneToHex(item.tone)}
+															strokeWidth="24"
+															strokeDasharray={`${dash} ${circumference - dash}`}
+															strokeDashoffset={-acc.offset}
+															transform="rotate(-90 120 120)"
+														/>
+													)
+													return { offset: acc.offset + dash, items: acc.items }
+												}, { offset: 0, items: [] })
+												return segments.items
+											})()}
+											<circle cx="120" cy="120" r="48" fill="#ffffff" />
+										</svg>
 									</div>
-									<div className="mt-6 space-y-4">
+									<div className="mt-5 space-y-4">
 										{filteredDistribution.map((item) => {
-											const total = filteredDistribution.reduce((sum, current) => sum + current.value, 0)
-											const percent = total ? Math.round((item.value / total) * 100) : 0
+											const total = Math.max(1, filteredDistribution.reduce((sum, current) => sum + current.value, 0))
+											const percent = Math.round((item.value / total) * 100)
 											return (
-												<div key={item.label} className="rounded-2xl bg-white px-4 py-4">
-													<div className="flex items-center justify-between gap-3 text-sm">
-														<div className="flex items-center gap-3 font-semibold text-slate-700">
-															<span className={`h-2.5 w-2.5 rounded-full ${item.tone}`} />
+												<div key={item.label}>
+													<div className="flex items-center justify-between gap-3">
+														<div className="flex items-center gap-3 text-[15px] font-medium text-slate-700">
+															<span className="h-3 w-3 rounded-full" style={{ backgroundColor: toneToHex(item.tone) }} />
 															{item.label}
 														</div>
 														<div className="text-right">
-															<div className="font-black text-slate-950">{item.value}</div>
-															<div className="text-[11px] font-bold text-slate-400">{percent}%</div>
+															<div className="text-[18px] font-black text-slate-950">{item.value}</div>
+															<div className="text-sm text-slate-400">{percent}%</div>
 														</div>
 													</div>
-													<div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
-														<div className={`h-full rounded-full ${item.tone}`} style={{ width: `${percent}%` }} />
+													<div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-100">
+														<div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: toneToHex(item.tone) }} />
 													</div>
 												</div>
 											)
@@ -488,7 +356,58 @@ export default function Reports() {
 									{!filteredDistribution.length && !isLoading ? <div className="mt-4 text-sm text-slate-500">No departments matched the current search.</div> : null}
 								</div>
 							</div>
-							<article className="rounded-[26px] border border-slate-200/80 bg-white p-5 sm:p-6"><div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black tracking-[-0.04em] text-slate-950">Recent Shift Compliance</h2><p className="mt-1 text-sm text-slate-500">Tracking the latest punch-in events and status exceptions.</p></div><button className="text-sm font-bold text-[#0f51ff]" onClick={() => setShowAllLogs((current) => !current)} type="button">{showAllLogs ? 'Show Fewer Logs' : 'View All Logs'}</button></div><div className="mt-5 overflow-x-auto"><table className="min-w-full text-left"><thead className="border-b border-slate-100 text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400"><tr><th className="px-2 py-3">Employee</th><th className="px-2 py-3">Shift Date</th><th className="px-2 py-3">Department</th><th className="px-2 py-3">Punch In</th><th className="px-2 py-3">Status</th><th className="px-2 py-3">Actions</th></tr></thead><tbody>{visibleCompliance.map((row) => <tr key={`${row.name}-${row.date}`} className="border-b border-slate-100 last:border-b-0 text-sm text-slate-700"><td className="px-2 py-4"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-[linear-gradient(135deg,#0f51ff,#91b2ff)] text-[11px] font-black text-white">{row.initials}</div><div><div className="font-semibold text-slate-900">{row.name}</div><div className="text-xs text-slate-500">{row.id}</div></div></div></td><td className="px-2 py-4">{row.date}</td><td className="px-2 py-4">{row.department}</td><td className="px-2 py-4 font-medium text-slate-900">{row.punchIn}</td><td className="px-2 py-4"><StatusBadge danger={row.danger}>{row.status}</StatusBadge></td><td className="px-2 py-4"><button className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setSelectedLog(row)} type="button"><FiMoreVertical className="h-4 w-4" /></button></td></tr>)}</tbody></table></div>{!filteredCompliance.length && !isLoading ? <div className="mt-4 text-sm text-slate-500">{normalizedSearch || filterMode !== 'ALL' ? 'No compliance log rows matched the current filters.' : 'No report rows are available yet.'}</div> : null}</article>
+
+							<article className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_20px_45px_rgba(15,23,42,0.08)] sm:p-6">
+								<div className="flex items-center justify-between gap-3">
+									<div>
+										<h2 className="text-[18px] font-semibold text-slate-950">Recent Shift Compliance</h2>
+									</div>
+									<button className="text-sm font-medium text-[#7aa2ff]" onClick={() => setShowAllLogs((current) => !current)} type="button">
+										{showAllLogs ? 'Show Fewer Logs' : 'View All Logs'}
+									</button>
+								</div>
+								<div className="mt-6 overflow-x-auto rounded-[22px] border border-slate-200/80 bg-[#f8faff]">
+									<table className="min-w-full text-left">
+										<thead className="border-b border-slate-200 text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+											<tr>
+												<th className="px-5 py-4">Employee</th>
+												<th className="px-5 py-4">Shift Date</th>
+												<th className="px-5 py-4">Department</th>
+												<th className="px-5 py-4">Punch In</th>
+												<th className="px-5 py-4">Status</th>
+												<th className="px-5 py-4 text-right">Actions</th>
+											</tr>
+										</thead>
+										<tbody>
+											{visibleCompliance.map((row) => (
+												<tr key={`${row.id}-${row.date}-${row.punchIn}`} className="border-b border-slate-200 last:border-b-0">
+													<td className="px-5 py-4">
+														<div className="flex items-center gap-3">
+															<div className="flex h-11 w-11 items-center justify-center rounded-full bg-[linear-gradient(135deg,#2563eb,#3b82f6)] text-[12px] font-black text-white">{row.initials}</div>
+															<div>
+																<div className="font-semibold text-slate-950">{row.name}</div>
+																<div className="text-xs text-slate-400">Employee ID: {row.id}</div>
+															</div>
+														</div>
+													</td>
+													<td className="px-5 py-4 text-sm text-slate-700">{row.date}</td>
+													<td className="px-5 py-4 text-sm text-slate-600">{row.department}</td>
+													<td className="px-5 py-4 text-sm font-semibold text-slate-950">{row.punchIn}</td>
+													<td className="px-5 py-4">
+														<span className={`inline-flex rounded-full px-3 py-1 text-xs font-extrabold uppercase tracking-[0.14em] ${complianceStatusClasses(row.status, row.danger)}`}>
+															{row.status}
+														</span>
+													</td>
+													<td className="px-5 py-4 text-right">
+														<button className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" onClick={() => setSelectedLog(row)} type="button"><FiMoreVertical className="h-4 w-4" /></button>
+													</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</div>
+								{!filteredCompliance.length && !isLoading ? <div className="mt-4 text-sm text-slate-500">{normalizedSearch ? 'No compliance log rows matched the current search.' : 'No report rows are available yet.'}</div> : null}
+							</article>
 						</section>
 					</div>
 				</div>
@@ -511,7 +430,7 @@ export default function Reports() {
 							<div><span className="font-bold text-slate-900">Status:</span> {selectedLog.status}</div>
 						</div>
 						<div className="mt-5 flex flex-wrap justify-end gap-3">
-							{selectedLog.danger ? <button className="rounded-full bg-rose-50 px-4 py-2 text-sm font-bold text-rose-600" onClick={() => setFilterMode('REVIEW')} type="button">Focus Review Queue</button> : null}
+							{selectedLog.danger ? <button className="rounded-full bg-rose-50 px-4 py-2 text-sm font-bold text-rose-600" onClick={() => navigate('/adjustments')} type="button">Open Review Queue</button> : null}
 							<button className="rounded-full bg-[#0f51ff] px-4 py-2 text-sm font-bold text-white" onClick={() => setSelectedLog(null)} type="button">Done</button>
 						</div>
 					</div>

@@ -20,11 +20,14 @@ export default function Login() {
 	const location = useLocation()
 	const [form, setForm] = useState({ email: '', password: '', remember: false })
 	const [error, setError] = useState(location.state?.message || '')
+	const [successMessage, setSuccessMessage] = useState('')
 	const [isSubmitting, setIsSubmitting] = useState(false)
+	const [isSendingReset, setIsSendingReset] = useState(false)
 
 	async function handleLogin(credentials) {
 		setIsSubmitting(true)
 		setError('')
+		setSuccessMessage('')
 
 		try {
 			const payload = await apiRequest('/api/auth/login', {
@@ -64,6 +67,31 @@ export default function Login() {
 			email: form.email.trim(),
 			password: form.password,
 		})
+	}
+
+	async function handleForgotPassword(event) {
+		event.preventDefault()
+		const email = form.email.trim()
+		if (!email) {
+			setError('Enter your email address first so we can send reset instructions.')
+			setSuccessMessage('')
+			return
+		}
+
+		try {
+			setIsSendingReset(true)
+			setError('')
+			setSuccessMessage('')
+			await apiRequest('/api/auth/forgot-password', {
+				method: 'POST',
+				body: JSON.stringify({ email }),
+			})
+			setSuccessMessage('Reset instructions were sent to your email. Use the temporary password in that message, then change it after login.')
+		} catch (requestError) {
+			setError(requestError.message || 'Unable to send password reset instructions right now.')
+		} finally {
+			setIsSendingReset(false)
+		}
 	}
 
 	return (
@@ -110,9 +138,10 @@ export default function Login() {
 									</label>
 									<a
 										href="#"
+										onClick={handleForgotPassword}
 										className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#1051ff] transition hover:text-[#0b3bc0]"
 									>
-										Forgot Password?
+										{isSendingReset ? 'Sending...' : 'Forgot Password?'}
 									</a>
 								</div>
 								<input
@@ -138,6 +167,12 @@ export default function Login() {
 							{error ? (
 								<div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
 									{error}
+								</div>
+							) : null}
+
+							{successMessage ? (
+								<div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-700">
+									{successMessage}
 								</div>
 							) : null}
 

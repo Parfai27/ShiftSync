@@ -1109,21 +1109,35 @@ public class ManagerWorkspaceService {
             .toList();
 
         List<ReportRow> recentCompliance = assignments.stream()
-            .sorted(Comparator.comparing(ShiftAssignment::getAssignedAt).reversed())
-            .limit(5)
+            .sorted(
+                Comparator.comparing((ShiftAssignment item) -> item.getShift().getShiftDate()).reversed()
+                    .thenComparing(item -> item.getShift().getStartTime(), Comparator.reverseOrder())
+                    .thenComparing(ShiftAssignment::getAssignedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+            )
+            .limit(20)
             .map(item -> {
                 User employee = item.getEmployee();
                 EmployeeProfile profile = profilesByUserId.get(employee.getId());
                 Shift shift = item.getShift();
                 boolean danger = shift.getAssignedStaff() < shift.getRequiredStaff();
+                String status;
+                if (danger) {
+                    status = "Coverage Gap";
+                } else if (shift.getShiftDate().isBefore(LocalDate.now())) {
+                    status = "Completed";
+                } else if (shift.getShiftDate().isEqual(LocalDate.now())) {
+                    status = "Today";
+                } else {
+                    status = "Scheduled";
+                }
                 return new ReportRow(
                     initials(employee.getFullName()),
                     employee.getFullName(),
-                    "Employee ID: " + (profile != null ? profile.getEmployeeCode() : employee.getId()),
+                    profile != null ? profile.getEmployeeCode() : "EMP-" + employee.getId(),
                     shift.getShiftDate().format(DATE_LABEL),
                     resolveDepartment(profile),
                     shift.getStartTime().format(SHIFT_TIME),
-                    danger ? "Review" : "Scheduled",
+                    status,
                     danger
                 );
             })

@@ -98,6 +98,9 @@ public final class OverviewPageDtos {
     public record EmployeeOverviewResponse(
         String employeeName,
         String roleLabel,
+        String managerName,
+        String managerRoleLabel,
+        String managerProfileImageUrl,
         List<EmployeeStat> stats,
         List<EmployeeScheduleItem> schedule,
         List<EmployeeNotificationItem> notifications,
