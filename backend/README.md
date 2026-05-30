@@ -4,10 +4,11 @@ Spring Boot backend for the ShiftSync frontend, aligned to the pharmacy scheduli
 
 ## Stack
 
-- Spring Boot 3
+- Java 21
+- Spring Boot 3.3
 - Spring Web
 - Spring Data JPA
-- Spring Security
+- Spring Security with JWT (stateless Bearer tokens)
 - PostgreSQL
 - Lombok
 - OpenAPI / Swagger UI
@@ -70,6 +71,7 @@ $env:SHIFT_SYNC_DB_URL="jdbc:postgresql://localhost:5432/shiftsync"
 $env:SHIFT_SYNC_DB_USERNAME="postgres"
 $env:SHIFT_SYNC_DB_PASSWORD="your_password"
 $env:SHIFT_SYNC_SERVER_PORT="8080"
+$env:SHIFT_SYNC_JWT_SECRET="use-a-long-random-secret-at-least-32-characters"
 ```
 
 ## Run
@@ -99,25 +101,35 @@ These are inserted automatically on first run and login now uses email:
 
 ## Useful Endpoints
 
+Public:
 - `GET /api/health`
 - `POST /api/auth/login`
-- `POST /api/auth/register`
-- `GET /api/dashboard/overview`
-- `GET /api/users`
-- `GET /api/users/employees`
+- `POST /api/auth/forgot-password`
+
+Authenticated (send `Authorization: Bearer <token>`):
+- `POST /api/auth/change-password`
+- `GET /api/auth/validate`
+- `GET /api/employee/**`
+- `POST /api/chat/message`
+
+Manager or Admin:
 - `GET /api/manager/workspace/{userId}`
+- `GET /api/dashboard/overview/{managerId}`
 - `GET /api/scheduling/shifts`
-- `POST /api/scheduling/shifts`
-- `GET /api/scheduling/adjustments`
-- `POST /api/scheduling/adjustments`
-- `GET /api/communication/notifications/{userId}`
-- `GET /api/communication/announcements/{branchId}`
-- `GET /api/admin/policies`
-- `GET /api/admin/audit-logs`
+- `POST /api/scheduling/manager/**`
+
+Admin only:
+- `GET /api/admin/**`
+- `POST /api/auth/register`
+
+Swagger UI:
 - `GET /swagger-ui.html`
 
-## Notes
+## Security
 
-- The frontend was not changed.
-- Security is intentionally lightweight at this stage so we can connect the UI first.
-- The next good step is to add JWT auth and wire the frontend pages to these endpoints.
+- Passwords are hashed with BCrypt.
+- Login returns a signed JWT. The frontend stores it and sends it on every API call.
+- Admin routes require `ROLE_ADMIN`.
+- Manager routes require `ROLE_MANAGER` or `ROLE_ADMIN`.
+- Employee routes require any authenticated active account.
+- Deactivated users cannot sign in and existing tokens are rejected on the next request.

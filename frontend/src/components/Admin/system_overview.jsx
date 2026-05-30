@@ -1,21 +1,22 @@
 import { useEffect, useState } from 'react'
 import {
 	FiActivity,
-	FiBell,
-	FiChevronDown,
 	FiCreditCard,
 	FiGlobe,
 	FiGrid,
 	FiLogOut,
 	FiMenu,
-	FiMoon,
 	FiSearch,
 	FiSettings,
 	FiUsers,
 } from 'react-icons/fi'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
 import { clearSession, loadSession } from '../../lib/session'
+import ThemeToggleButton from '../shared/ThemeToggleButton.jsx'
+import AdminProfileMenu from '../shared/AdminProfileMenu.jsx'
+import MobileAdminMenu from '../shared/MobileAdminMenu.jsx'
+import EmployeeNotificationBell from '../shared/EmployeeNotificationBell.jsx'
 
 const fallbackOverview = {
 	systemHealth: '0%',
@@ -29,9 +30,13 @@ const fallbackOverview = {
 }
 
 export default function SystemOverview() {
+	const navigate = useNavigate()
 	const session = loadSession()
 	const [overview, setOverview] = useState(fallbackOverview)
 	const [error, setError] = useState('')
+	const [actionMessage, setActionMessage] = useState('')
+	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+	const [search, setSearch] = useState('')
 
 	useEffect(() => {
 		let cancelled = false
@@ -57,10 +62,24 @@ export default function SystemOverview() {
 	}, [])
 
 	const adminName = session?.fullName || 'System Administrator'
+	const adminInitials = adminName
+		.split(' ')
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part.charAt(0).toUpperCase())
+		.join('') || 'AD'
+	const filteredAuditLogs = overview.auditLogs.filter((log) => {
+		const query = search.trim().toLowerCase()
+		if (!query) {
+			return true
+		}
+		return [log.timestamp, log.event, log.origin, log.actor, log.status].join(' ').toLowerCase().includes(query)
+	})
 
 	return (
 		<main className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#eef4ff_0%,#f7f9ff_38%,#eef2ff_100%)] text-slate-900">
 			<div className="flex h-screen w-full overflow-hidden border border-white/80 bg-white/85 backdrop-blur-xl">
+				<MobileAdminMenu activePath="/admin-overview" isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
 				<aside className="fixed left-0 top-0 hidden h-screen shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-[#f2f6ff]/80 px-5 py-6 xl:flex" style={{ width: '264px' }}>
 					<div className="flex w-full items-center justify-start gap-3">
 						<img src="/logo.png" alt="ShiftSync" className="-ml-6 h-19 w-auto object-contain" />
@@ -82,7 +101,7 @@ export default function SystemOverview() {
 				<div className="dashboard-main-offset flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
 					<header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/75 px-4 py-4 backdrop-blur-xl sm:px-6 xl:px-8">
 						<div className="flex items-center gap-3 xl:hidden">
-							<button className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700"><FiMenu className="h-5 w-5" /></button>
+							<button className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700" onClick={() => setIsMobileMenuOpen(true)} type="button"><FiMenu className="h-5 w-5" /></button>
 							<div className="flex min-w-0 items-center gap-3">
 								<span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#0f51ff] text-xs font-black text-white">S</span>
 								<div className="min-w-0">
@@ -95,20 +114,13 @@ export default function SystemOverview() {
 						<div className="mt-4 flex flex-col gap-4 xl:mt-0 xl:flex-row xl:items-center xl:justify-between">
 							<label className="relative w-full max-w-3xl">
 								<FiSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-								<input type="search" placeholder="Search metrics, users, or services..." className="h-12 w-full rounded-full border border-slate-200/80 bg-[#f5f7ff] px-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#0f51ff] focus:bg-white" />
+								<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search metrics, users, or services..." className="h-12 w-full rounded-full border border-slate-200/80 bg-[#f5f7ff] px-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#0f51ff] focus:bg-white" />
 							</label>
 
 							<div className="flex items-center justify-between gap-3 xl:justify-end">
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiBell className="h-4 w-4" /></button>
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiMoon className="h-4 w-4" /></button>
-								<div className="flex items-center gap-3 rounded-full bg-white px-3 py-2">
-									<div className="text-right leading-tight">
-										<div className="text-sm font-bold text-slate-900">{adminName}</div>
-										<div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">System Admin</div>
-									</div>
-									<div className="h-10 w-10 overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f51ff,#7ea4ff)] ring-2 ring-[#eef3ff]" />
-									<FiChevronDown className="h-4 w-4 text-slate-400" />
-								</div>
+								<EmployeeNotificationBell to="/admin-auditlogs" unreadCount={0} />
+								<ThemeToggleButton />
+								<AdminProfileMenu initials={adminInitials} name={adminName} role="System Admin" />
 							</div>
 						</div>
 					</header>
@@ -120,6 +132,9 @@ export default function SystemOverview() {
 
 							{error ? (
 								<div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div>
+							) : null}
+							{actionMessage ? (
+								<div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{actionMessage}</div>
 							) : null}
 
 							<div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
@@ -144,7 +159,7 @@ export default function SystemOverview() {
 									<div className="mt-8 text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-100">Active Sessions</div>
 									<div className="mt-2 text-[60px] font-black tracking-[-0.08em] leading-none">{overview.activeSessions}</div>
 									<div className="mt-3 text-sm font-semibold text-blue-100">Users tracked in the latest notification and platform activity flow</div>
-									<button className="mt-7 w-full rounded-xl bg-white/12 px-4 py-3 text-xs font-extrabold uppercase tracking-[0.14em] text-white transition hover:bg-white/20">Real-time Map</button>
+									<button className="mt-7 w-full rounded-xl bg-white/12 px-4 py-3 text-xs font-extrabold uppercase tracking-[0.14em] text-white transition hover:bg-white/20" onClick={() => navigate('/admin-user-management')} type="button">Real-time Map</button>
 								</article>
 							</div>
 
@@ -153,13 +168,18 @@ export default function SystemOverview() {
 									<h3 className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-slate-500">User Distribution</h3>
 									<div className="mt-4 space-y-3">
 										{overview.userDistribution.map((item, index) => (
-											<div key={item.role} className="flex items-center justify-between gap-2">
+											<button
+												key={item.role}
+												className="flex w-full items-center justify-between gap-2 rounded-xl px-2 py-1 text-left transition hover:bg-[#f8faff]"
+												onClick={() => navigate('/admin-user-management')}
+												type="button"
+											>
 												<div className="flex items-center gap-2 text-sm text-slate-700">
 													<span className={`h-2 w-2 rounded-full ${index === 0 ? 'bg-[#0f51ff]' : index === 1 ? 'bg-[#5a79e8]' : 'bg-[#8ca2ea]'}`} />
 													{item.role}
 												</div>
 												<div className="text-sm font-semibold text-slate-900">{item.count.toLocaleString()}</div>
-											</div>
+											</button>
 										))}
 									</div>
 									<div className="mt-6 h-2 w-full overflow-hidden rounded-full bg-[#edf2ff]">
@@ -176,7 +196,7 @@ export default function SystemOverview() {
 									<p className="mt-2 text-xs text-slate-500">Total users available in the connected backend repository.</p>
 									<div className="mt-5 flex items-center justify-between rounded-xl bg-[#f5f8ff] px-4 py-3">
 										<div className="text-xs font-bold text-slate-700">Active branches</div>
-										<button className="text-xs font-bold text-[#0f51ff]">{overview.activeBranches}</button>
+										<button className="text-xs font-bold text-[#0f51ff]" onClick={() => navigate('/admin-settings')} type="button">{overview.activeBranches}</button>
 									</div>
 								</article>
 
@@ -184,9 +204,14 @@ export default function SystemOverview() {
 									<h3 className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-slate-500">Regional Nodes</h3>
 									<div className="mt-4 grid grid-cols-4 gap-2">
 										{overview.regionalNodes.map((region) => (
-											<div key={region.label} className={`rounded-md px-1 py-2 text-center text-[10px] font-extrabold uppercase tracking-[0.12em] ${region.healthy ? 'bg-[#0f51ff] text-white' : 'bg-[#e9efff] text-[#3150ba]'}`}>
+											<button
+												key={region.label}
+												className={`rounded-md px-1 py-2 text-center text-[10px] font-extrabold uppercase tracking-[0.12em] transition hover:scale-[1.02] ${region.healthy ? 'bg-[#0f51ff] text-white' : 'bg-[#e9efff] text-[#3150ba]'}`}
+												onClick={() => setActionMessage(`${region.label} is currently marked as ${region.healthy ? 'healthy' : 'attention needed'} in the live platform scope.`)}
+												type="button"
+											>
 												{region.label}
-											</div>
+											</button>
 										))}
 									</div>
 									<p className="mt-4 text-center text-xs text-slate-500">{overview.regionalNodes.filter((item) => item.healthy).length}/{overview.regionalNodes.length || 1} nodes healthy</p>
@@ -196,7 +221,7 @@ export default function SystemOverview() {
 							<article className="mt-5 rounded-2xl border border-slate-200/80 bg-white">
 								<div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
 									<h3 className="text-lg font-bold text-slate-900">Recent Critical Audit Logs</h3>
-									<button className="text-xs font-extrabold uppercase tracking-[0.12em] text-[#0f51ff]">View All Records</button>
+									<button className="text-xs font-extrabold uppercase tracking-[0.12em] text-[#0f51ff]" onClick={() => navigate('/admin-auditlogs')} type="button">View All Records</button>
 								</div>
 								<div className="overflow-x-auto">
 									<table className="min-w-full text-left">
@@ -210,8 +235,8 @@ export default function SystemOverview() {
 											</tr>
 										</thead>
 										<tbody className="text-sm text-slate-700">
-											{overview.auditLogs.map((log) => (
-												<tr key={`${log.timestamp}-${log.event}`} className="border-t border-slate-100">
+											{filteredAuditLogs.map((log) => (
+												<tr key={`${log.timestamp}-${log.event}`} className="cursor-pointer border-t border-slate-100 transition hover:bg-[#f8faff]" onClick={() => navigate('/admin-auditlogs')}>
 													<td className="px-5 py-3">{log.timestamp}</td>
 													<td className="px-5 py-3 font-semibold text-slate-900">{log.event}</td>
 													<td className="px-5 py-3">{log.origin}</td>

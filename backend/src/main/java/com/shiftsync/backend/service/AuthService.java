@@ -12,6 +12,8 @@ import com.shiftsync.backend.model.User;
 import com.shiftsync.backend.repository.AuditLogRepository;
 import com.shiftsync.backend.repository.BranchRepository;
 import com.shiftsync.backend.repository.UserRepository;
+import com.shiftsync.backend.security.JwtService;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,7 @@ public class AuthService {
     private final AuditLogRepository auditLogRepository;
     private final PasswordEncoder passwordEncoder;
     private final CredentialEmailService credentialEmailService;
+    private final JwtService jwtService;
 
     public AuthResponse login(LoginRequest request) {
         User user = userRepository.findByEmail(request.email()).orElse(null);
@@ -40,19 +43,17 @@ public class AuthService {
             throw new IllegalArgumentException("Invalid email or password");
         }
 
+        if (!user.isActive()) {
+            logLoginActivity(user, "Login failed", "Inactive account for " + user.getEmail());
+            throw new IllegalArgumentException("This account has been deactivated. Contact your manager or administrator.");
+        }
+
         logLoginActivity(user, "Login successful", "User signed in with email " + user.getEmail());
 
-        return new AuthResponse(
-            user.getId(),
-            user.getFullName(),
-            user.getUsername(),
-            user.getEmail(),
-            user.getRole(),
-            user.getBranch() != null ? user.getBranch().getId() : null,
-            user.getProfileImageUrl(),
-            user.isMustChangePassword(),
-            "Login successful"
-        );
+        String token = jwtService.generateToken(user, request.rememberMe());
+        Instant tokenExpiresAt = jwtService.extractExpiration(token);
+
+        return toAuthResponse(user, token, tokenExpiresAt, "Login successful");
     }
 
     public AuthResponse register(RegisterRequest request) {
@@ -75,17 +76,9 @@ public class AuthService {
 
         userRepository.save(user);
         logLoginActivity(user, "Registration successful", "New " + user.getRole().name() + " account registered with email " + user.getEmail());
-        return new AuthResponse(
-            user.getId(),
-            user.getFullName(),
-            user.getUsername(),
-            user.getEmail(),
-            user.getRole(),
-            user.getBranch() != null ? user.getBranch().getId() : null,
-            user.getProfileImageUrl(),
-            user.isMustChangePassword(),
-            "Registration successful"
-        );
+        String token = jwtService.generateToken(user, false);
+        Instant tokenExpiresAt = jwtService.extractExpiration(token);
+        return toAuthResponse(user, token, tokenExpiresAt, "Registration successful");
     }
 
     public void changePassword(ChangePasswordRequest request) {
@@ -140,6 +133,22 @@ public class AuthService {
         if (!emailSent) {
             throw new IllegalArgumentException("Password reset instructions could not be emailed right now. Please try again later.");
         }
+    }
+
+    private AuthResponse toAuthResponse(User user, String token, Instant tokenExpiresAt, String message) {
+        return new AuthResponse(
+            user.getId(),
+            user.getFullName(),
+            user.getUsername(),
+            user.getEmail(),
+            user.getRole(),
+            user.getBranch() != null ? user.getBranch().getId() : null,
+            user.getProfileImageUrl(),
+            user.isMustChangePassword(),
+            token,
+            tokenExpiresAt.toString(),
+            message
+        );
     }
 
     private void logLoginActivity(User actor, String action, String details) {

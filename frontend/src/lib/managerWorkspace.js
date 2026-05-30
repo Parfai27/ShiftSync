@@ -173,6 +173,13 @@ export function archiveManagedEmployee(employeeId, payload) {
 	})
 }
 
+export function updateManagedEmployeeStatus(employeeId, payload) {
+	return apiRequest(`/api/manager/employees/${employeeId}/status`, {
+		method: 'PATCH',
+		body: JSON.stringify(payload),
+	})
+}
+
 export function createManagedEmployee(payload) {
 	return apiRequest('/api/manager/employees', {
 		method: 'POST',

@@ -66,6 +66,7 @@ export default function Login() {
 		handleLogin({
 			email: form.email.trim(),
 			password: form.password,
+			remember: form.remember,
 		})
 	}
 

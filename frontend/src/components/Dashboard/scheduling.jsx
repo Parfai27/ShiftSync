@@ -68,6 +68,14 @@ function normalizeShiftRole(role) {
 	return ''
 }
 
+function buildCellTargetKey(employeeId, shiftDate) {
+	return `cell:${employeeId}:${shiftDate}`
+}
+
+function buildOpenRoleTargetKey(shiftDate, shiftName, role) {
+	return `open:${shiftDate}:${shiftName}:${role}`
+}
+
 export default function Scheduling() {
 	const navigate = useNavigate()
 	const [viewMode, setViewMode] = useState('WEEK')
@@ -90,6 +98,8 @@ export default function Scheduling() {
 	})
 	const [managedAssignment, setManagedAssignment] = useState(null)
 	const [replacementEmployeeId, setReplacementEmployeeId] = useState('')
+	const [dragPayload, setDragPayload] = useState(null)
+	const [dragTargetKey, setDragTargetKey] = useState('')
 	const scheduleGridRef = useRef(null)
 
 	const board = scheduling.weeklyBoard || { label: '', days: [] }
@@ -222,6 +232,20 @@ export default function Scheduling() {
 		setManagedAssignment(preset)
 	}
 
+	function clearDragState() {
+		setDragPayload(null)
+		setDragTargetKey('')
+	}
+
+	function handleDragStart(payload) {
+		setDragPayload(payload)
+		setDragTargetKey('')
+	}
+
+	function handleDragEnd() {
+		clearDragState()
+	}
+
 	async function runSchedulingAction(path, actionKey, fallbackMessage) {
 		try {
 			setActionError('')
@@ -270,6 +294,104 @@ export default function Scheduling() {
 			setActionError(requestError.message || 'Unable to assign the selected employee to that shift.')
 		} finally {
 			setActiveAction('')
+		}
+	}
+
+	async function handleDragAssignToEmployee(targetEmployeeId, shiftDate, shiftName) {
+		if (!manager?.userId) {
+			setActionError('No active manager session was found.')
+			return
+		}
+
+		try {
+			setActionError('')
+			setActionMessage('')
+			setActiveAction('drag-assign')
+			await apiRequest('/api/scheduling/manager/assign-shift', {
+				method: 'POST',
+				body: JSON.stringify({
+					managerId: manager.userId,
+					employeeId: Number(targetEmployeeId),
+					shiftDate,
+					shiftName,
+				}),
+			})
+			await reloadWorkspace()
+			setActionMessage('Shift assigned successfully.')
+		} catch (requestError) {
+			setActionError(requestError.message || 'Unable to assign this shift by drag and drop.')
+		} finally {
+			setActiveAction('')
+			clearDragState()
+		}
+	}
+
+	async function handleDragReassignToEmployee(currentEmployeeId, replacementEmployeeId, shiftDate, shiftName) {
+		if (!manager?.userId) {
+			setActionError('No active manager session was found.')
+			return
+		}
+
+		try {
+			setActionError('')
+			setActionMessage('')
+			setActiveAction('drag-reassign')
+			await apiRequest('/api/scheduling/manager/reassign-shift', {
+				method: 'POST',
+				body: JSON.stringify({
+					managerId: manager.userId,
+					currentEmployeeId: Number(currentEmployeeId),
+					replacementEmployeeId: Number(replacementEmployeeId),
+					shiftDate,
+					shiftName,
+				}),
+			})
+			await reloadWorkspace()
+			setActionMessage('Shift reassigned successfully.')
+		} catch (requestError) {
+			setActionError(requestError.message || 'Unable to reassign this shift by drag and drop.')
+		} finally {
+			setActiveAction('')
+			clearDragState()
+		}
+	}
+
+	async function handleDropOnEmployeeCell(targetEmployee, shiftDate) {
+		if (!dragPayload || !targetEmployee || !shiftDate) {
+			return
+		}
+
+		if (dragPayload.type === 'OPEN_ROLE') {
+			if (dragPayload.shiftDate !== shiftDate) {
+				setActionError('Drop the open role onto an employee cell for the same day.')
+				clearDragState()
+				return
+			}
+			if (normalizeShiftRole(targetEmployee.role) !== dragPayload.role) {
+				setActionError(`This open role needs a ${dragPayload.role}.`)
+				clearDragState()
+				return
+			}
+			await handleDragAssignToEmployee(targetEmployee.userId, shiftDate, dragPayload.shiftName)
+			return
+		}
+
+		if (dragPayload.type === 'ASSIGNED_SHIFT') {
+			if (dragPayload.shiftDate !== shiftDate) {
+				setActionError('You can only drag an assigned shift to another employee on the same day.')
+				clearDragState()
+				return
+			}
+			if (String(dragPayload.employeeId) === String(targetEmployee.userId)) {
+				clearDragState()
+				return
+			}
+			if (normalizeShiftRole(targetEmployee.role) !== dragPayload.role) {
+				setActionError(`The replacement employee must have the same role: ${dragPayload.role}.`)
+				clearDragState()
+				return
+			}
+			await handleDragReassignToEmployee(dragPayload.employeeId, targetEmployee.userId, shiftDate, dragPayload.shiftName)
 		}
 	}
 
@@ -546,7 +668,39 @@ export default function Scheduling() {
 																	{openShiftAssignments[index]?.length ? openShiftAssignments[index].map((item, itemIndex) => (
 																		<button
 																			key={`${day.fullDate}-${item.role}-${itemIndex}`}
-																			className={`block w-full rounded-2xl border-l-4 px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneCardClasses(item.tone)}`}
+																			draggable
+																			onDragStart={() =>
+																				handleDragStart({
+																					type: 'OPEN_ROLE',
+																					shiftDate: day.isoDate,
+																					shiftName: item.shiftName,
+																					role: item.role,
+																				})
+																			}
+																			onDragEnd={handleDragEnd}
+																			onDragOver={(event) => {
+																				if (dragPayload?.type === 'ASSIGNED_SHIFT') {
+																					event.preventDefault()
+																					const targetKey = buildOpenRoleTargetKey(day.isoDate, item.shiftName, item.role)
+																					setDragTargetKey(targetKey)
+																				}
+																			}}
+																			onDragLeave={() => {
+																				const targetKey = buildOpenRoleTargetKey(day.isoDate, item.shiftName, item.role)
+																				if (dragTargetKey === targetKey) {
+																					setDragTargetKey('')
+																				}
+																			}}
+																			onDrop={async (event) => {
+																				event.preventDefault()
+																				if (dragPayload?.type === 'ASSIGNED_SHIFT') {
+																					setActionError('Drag assigned shifts onto another employee day cell to reassign them.')
+																				}
+																				clearDragState()
+																			}}
+																			className={`block w-full rounded-2xl border-l-4 px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneCardClasses(item.tone)} ${
+																				dragTargetKey === buildOpenRoleTargetKey(day.isoDate, item.shiftName, item.role) ? 'ring-2 ring-[#0f51ff] ring-offset-2' : ''
+																			}`}
 																			onClick={() =>
 																				openAssignmentModal({
 																					shiftDate: day.isoDate,
@@ -586,12 +740,62 @@ export default function Scheduling() {
 																</div>
 															</div>
 															{employee.dailyAssignments.map((entries, dayIndex) => (
-																<div key={`${employee.name}-${dayIndex}`} className="min-h-[140px] border-r border-slate-200/80 bg-white p-3 last:border-r-0">
+																<div
+																	key={`${employee.name}-${dayIndex}`}
+																	className={`min-h-[140px] border-r border-slate-200/80 bg-white p-3 last:border-r-0 ${
+																		dragTargetKey === buildCellTargetKey(employeeOptions.find((option) => option.name === employee.name)?.userId, visibleBoardDays[dayIndex]?.isoDate ?? '')
+																			? 'bg-[#eef4ff]'
+																			: ''
+																	}`}
+																	onDragOver={(event) => {
+																		if (!dragPayload) {
+																			return
+																		}
+																		event.preventDefault()
+																		const targetEmployeeId = employeeOptions.find((option) => option.name === employee.name)?.userId
+																		const shiftDate = visibleBoardDays[dayIndex]?.isoDate ?? ''
+																		const targetKey = buildCellTargetKey(targetEmployeeId, shiftDate)
+																		setDragTargetKey(targetKey)
+																	}}
+																	onDragLeave={() => {
+																		const targetEmployeeId = employeeOptions.find((option) => option.name === employee.name)?.userId
+																		const shiftDate = visibleBoardDays[dayIndex]?.isoDate ?? ''
+																		const targetKey = buildCellTargetKey(targetEmployeeId, shiftDate)
+																		if (dragTargetKey === targetKey) {
+																			setDragTargetKey('')
+																		}
+																	}}
+																	onDrop={async (event) => {
+																		event.preventDefault()
+																		const targetEmployee = employeeOptions.find((option) => option.name === employee.name)
+																		await handleDropOnEmployeeCell(targetEmployee, visibleBoardDays[dayIndex]?.isoDate ?? '')
+																	}}
+																>
 																	<div className="space-y-2">
 																		{entries.length ? entries.map((entry, entryIndex) => (
 																			<button
 																				key={`${employee.name}-${entry.shiftName}-${entryIndex}`}
-																				className={`block w-full rounded-2xl border-l-4 px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneCardClasses(entry.tone)}`}
+																				draggable
+																				onDragStart={() => {
+																					const employeeOption = employeeByName.get(employee.name)
+																					handleDragStart({
+																						type: 'ASSIGNED_SHIFT',
+																						employeeId: employeeOption?.userId,
+																						employeeName: employee.name,
+																						role: normalizeShiftRole(employee.role),
+																						shiftDate: visibleBoardDays[dayIndex]?.isoDate ?? '',
+																						shiftName: entry.shiftName,
+																					})
+																				}}
+																				onDragEnd={handleDragEnd}
+																				className={`block w-full rounded-2xl border-l-4 px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneCardClasses(entry.tone)} ${
+																					dragPayload?.type === 'ASSIGNED_SHIFT' &&
+																					dragPayload?.employeeName === employee.name &&
+																					dragPayload?.shiftName === entry.shiftName &&
+																					dragPayload?.shiftDate === (visibleBoardDays[dayIndex]?.isoDate ?? '')
+																						? 'opacity-60'
+																						: ''
+																				}`}
 																				onClick={() => {
 																					const employeeOption = employeeByName.get(employee.name)
 																					openManageAssignmentModal({
@@ -612,7 +816,11 @@ export default function Scheduling() {
 																			</button>
 																		)) : (
 																			<button
-																				className="min-h-[100px] w-full rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400 transition hover:border-[#0f51ff] hover:bg-[#eef4ff] hover:text-[#0f51ff]"
+																				className={`min-h-[100px] w-full rounded-2xl border border-dashed text-[11px] font-bold uppercase tracking-[0.14em] transition ${
+																					dragTargetKey === buildCellTargetKey(employeeOptions.find((option) => option.name === employee.name)?.userId, visibleBoardDays[dayIndex]?.isoDate ?? '')
+																						? 'border-[#0f51ff] bg-[#eef4ff] text-[#0f51ff]'
+																						: 'border-slate-200 bg-slate-50/70 text-slate-400 hover:border-[#0f51ff] hover:bg-[#eef4ff] hover:text-[#0f51ff]'
+																				}`}
 																				onClick={() =>
 																					openAssignmentModal({
 																						employeeId: String(employeeOptions.find((option) => option.name === employee.name)?.userId ?? ''),
@@ -640,7 +848,7 @@ export default function Scheduling() {
 										</div>
 
 										<div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-sm text-slate-500">
-											<div className="font-medium text-slate-500">Review open roles by day, then assign staff or run auto-scheduling to complete the weekly grid.</div>
+											<div className="font-medium text-slate-500">Review open roles by day, then assign staff, drag open roles onto employees, or drag assigned shifts to another employee on the same day.</div>
 											<div className="flex items-center gap-3">
 												<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handlePrint} title="Print schedule" type="button"><FiPrinter className="h-4 w-4" /></button>
 												<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handleExportSchedule} title="Download schedule" type="button"><FiDownload className="h-4 w-4" /></button>

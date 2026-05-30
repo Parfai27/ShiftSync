@@ -1,179 +1,291 @@
-import {
-	FiActivity,
-	FiBell,
-	FiChevronDown,
-	FiChevronLeft,
-	FiChevronRight,
-	FiCreditCard,
-	FiDownload,
-	FiGrid,
-	FiLogOut,
-	FiMenu,
-	FiMoon,
-	FiPlus,
-	FiSearch,
-	FiSettings,
-	FiUsers,
-} from 'react-icons/fi'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { FiDownload, FiUsers } from 'react-icons/fi'
+import AdminFrame from './AdminFrame.jsx'
+import { getAdminUsers, resetAdminUserCredentials, updateAdminUserRole, updateAdminUserStatus } from '../../lib/adminWorkspace'
+import { downloadCsv } from '../../lib/export'
+import { loadSession } from '../../lib/session'
 
-const summaryCards = [
-	{ label: 'Total Users', value: '1,284', detail: '+12%', detailTone: 'text-[#0f51ff]' },
-	{ label: 'Active Now', value: '942', detail: '●', detailTone: 'text-[#8fa0d4]' },
-	{ label: 'Admin Roles', value: '24', detail: 'Stable', detailTone: 'text-slate-500' },
-	{ label: 'Pending Sync', value: '3', detail: '△', detailTone: 'text-rose-500', valueTone: 'text-rose-600' },
-]
+const fallbackData = {
+	totalUsers: 0,
+	activeUsers: 0,
+	adminUsers: 0,
+	inactiveUsers: 0,
+	users: [],
+}
 
-const users = [
-	{ name: 'Julian Vance', email: 'j.vian.v@atlasstream.io', role: 'Admin', active: true, avatar: 'JV' },
-	{ name: 'Elena Rodriguez', email: 'e.rodriguez@atlasstream.io', role: 'Manager', active: true, avatar: 'ER' },
-	{ name: 'Markus Theron', email: 'm.theron@atlasstream.io', role: 'Employee', active: false, avatar: 'MT' },
-	{ name: 'Sarah Jenkins', email: 's.jenkins@atlasstream.io', role: 'Employee', active: true, avatar: 'SJ' },
-]
+function toInitials(fullName) {
+	return fullName
+		.split(' ')
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part.charAt(0).toUpperCase())
+		.join('')
+}
 
 export default function UserManagement() {
+	const session = loadSession()
+	const [search, setSearch] = useState('')
+	const [roleFilter, setRoleFilter] = useState('All Roles')
+	const [data, setData] = useState(fallbackData)
+	const [error, setError] = useState('')
+	const [actionMessage, setActionMessage] = useState('')
+	const [busyUserId, setBusyUserId] = useState(null)
+	const [busyResetUserId, setBusyResetUserId] = useState(null)
+	const [pendingRoles, setPendingRoles] = useState({})
+
+	useEffect(() => {
+		let cancelled = false
+
+		async function loadUsers() {
+			try {
+				const response = await getAdminUsers()
+				if (!cancelled) {
+					setData(response)
+				}
+			} catch (loadError) {
+				if (!cancelled) {
+					setError(loadError.message || 'Unable to load user management data.')
+				}
+			}
+		}
+
+		loadUsers()
+		return () => {
+			cancelled = true
+		}
+	}, [])
+
+	const roles = useMemo(() => ['All Roles', ...Array.from(new Set(data.users.map((user) => user.role)))], [data.users])
+
+	const filteredUsers = useMemo(() => {
+		const query = search.trim().toLowerCase()
+		return data.users.filter((user) => {
+			const matchesRole = roleFilter === 'All Roles' || user.role === roleFilter
+			const haystack = [user.fullName, user.email, user.role, user.branchLabel].join(' ').toLowerCase()
+			return matchesRole && (!query || haystack.includes(query))
+		})
+	}, [data.users, roleFilter, search])
+
+	function handleExport() {
+		const header = 'Full Name,Email,Role,Status,Workspace\n'
+		const rows = filteredUsers
+			.map((user) => `"${user.fullName}","${user.email}","${user.role}","${user.active ? 'Active' : 'Inactive'}","${user.branchLabel}"`)
+			.join('\n')
+		downloadCsv(`${header}${rows}`, 'admin-user-directory.csv')
+	}
+
+	async function reloadUsers() {
+		const response = await getAdminUsers()
+		setData(response)
+	}
+
+	function getPendingRole(user) {
+		return pendingRoles[user.id] || user.role.toUpperCase()
+	}
+
+	async function handleToggleUser(user) {
+		setActionMessage('')
+		setError('')
+		setBusyUserId(user.id)
+		try {
+			const updated = await updateAdminUserStatus(user.id, {
+				actorUserId: session?.userId ?? null,
+				active: !user.active,
+			})
+			await reloadUsers()
+			setActionMessage(`${updated.fullName} is now ${updated.active ? 'active' : 'inactive'}.`)
+		} catch (actionError) {
+			setError(actionError.message || 'Unable to update user status.')
+		} finally {
+			setBusyUserId(null)
+		}
+	}
+
+	async function handleRoleSave(user) {
+		const nextRole = getPendingRole(user)
+		if (nextRole === user.role.toUpperCase()) {
+			return
+		}
+
+		setActionMessage('')
+		setError('')
+		setBusyUserId(user.id)
+		try {
+			const updated = await updateAdminUserRole(user.id, {
+				actorUserId: session?.userId ?? null,
+				role: nextRole,
+			})
+			await reloadUsers()
+			setPendingRoles((current) => ({ ...current, [user.id]: updated.role.toUpperCase() }))
+			setActionMessage(`${updated.fullName} is now assigned the ${updated.role} role.`)
+		} catch (actionError) {
+			setError(actionError.message || 'Unable to update user role.')
+		} finally {
+			setBusyUserId(null)
+		}
+	}
+
+	async function handleResetCredentials(user) {
+		setActionMessage('')
+		setError('')
+		setBusyResetUserId(user.id)
+		try {
+			const response = await resetAdminUserCredentials(user.id, {
+				actorUserId: session?.userId ?? null,
+			})
+			setActionMessage(response.emailSent ? response.message : `${response.message} Temporary password: ${response.temporaryPassword}`)
+		} catch (actionError) {
+			setError(actionError.message || 'Unable to reset credentials.')
+		} finally {
+			setBusyResetUserId(null)
+		}
+	}
+
 	return (
-		<main className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#eef4ff_0%,#f7f9ff_38%,#eef2ff_100%)] text-slate-900">
-			<div className="flex h-screen w-full overflow-hidden border border-white/80 bg-white/85 backdrop-blur-xl">
-				<aside className="fixed left-0 top-0 hidden h-screen shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-[#f2f6ff]/80 px-5 py-6 xl:flex" style={{ width: '264px' }}>
-					<div className="mb-10 flex items-center gap-3">
-						<span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0f51ff] text-sm font-black text-white">A</span>
-						<div>
-							<div className="text-[19px] font-extrabold leading-5 tracking-[-0.04em] text-slate-900">ShiftSync</div>
-							<div className="mt-1 text-[11px] font-medium uppercase tracking-[0.28em] text-slate-500">Workforce Management</div>
-						</div>
+		<AdminFrame
+			activeNav="users"
+			title="User Management"
+			description="Oversee access, roles, and account status across the live ShiftSync workforce."
+			searchPlaceholder="Search users, roles, and workspace assignments..."
+			searchValue={search}
+			onSearchChange={setSearch}
+			headerActions={(
+				<button className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-[#eef2ff] px-4 text-xs font-bold text-[#1f3b9c] transition hover:bg-[#e3eafe]" onClick={handleExport}>
+					<FiDownload className="h-4 w-4" /> Export Directory
+				</button>
+			)}
+		>
+			{error ? (
+				<div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div>
+			) : null}
+			{actionMessage ? (
+				<div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{actionMessage}</div>
+			) : null}
+
+			<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+				{[
+					{ label: 'Total Users', value: data.totalUsers, detail: `${filteredUsers.length} currently visible`, tone: 'text-[#0f51ff]' },
+					{ label: 'Active Accounts', value: data.activeUsers, detail: 'Enabled for sign-in', tone: 'text-emerald-600' },
+					{ label: 'Admin Accounts', value: data.adminUsers, detail: 'System-level access', tone: 'text-slate-500' },
+					{ label: 'Inactive Accounts', value: data.inactiveUsers, detail: 'Disabled or archived', tone: 'text-rose-600' },
+				].map((item) => (
+					<article key={item.label} className="rounded-2xl border border-slate-200/80 bg-white p-4">
+						<div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-500">{item.label}</div>
+						<div className="mt-2 text-[38px] font-black leading-none tracking-[-0.06em] text-slate-950">{item.value}</div>
+						<div className={`mt-1 text-xs font-semibold ${item.tone}`}>{item.detail}</div>
+					</article>
+				))}
+			</div>
+
+			<article className="mt-5 overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
+				<div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-[#f7f9ff] px-4 py-4 sm:px-5">
+					<div className="flex flex-wrap items-center gap-2">
+						{roles.map((role) => (
+							<button
+								key={role}
+								className={`rounded-full px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] ${roleFilter === role ? 'bg-[#0f51ff] text-white' : 'bg-[#e8edff] text-[#2847ad]'}`}
+								onClick={() => setRoleFilter(role)}
+							>
+								{role}
+							</button>
+						))}
 					</div>
-
-					<nav className="space-y-2 text-[14px] font-medium text-slate-600">
-						<Link className="flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-white/70" to="/admin-overview"><FiGrid className="h-4 w-4" /> SystemOverview</Link>
-						<Link className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 font-semibold text-[#0f51ff]" to="/admin-user-management"><FiUsers className="h-4 w-4" /> UserManagement</Link>
-						<Link className="flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-white/70" to="/admin-auditlogs"><FiActivity className="h-4 w-4" /> AuditLogs</Link>
-						<Link className="flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-white/70" to="/admin-api"><FiCreditCard className="h-4 w-4" /> Integrations & API</Link>
-						<Link className="flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-white/70" to="/admin-settings"><FiSettings className="h-4 w-4" /> Settings</Link>
-					</nav>
-
-					<div className="mt-auto space-y-1 pt-8 text-sm text-slate-600">
-						<Link className="flex items-center gap-3 rounded-xl px-4 py-3 font-semibold text-rose-600 hover:bg-rose-50" to="/login"><FiLogOut className="h-4 w-4" /> Logout</Link>
-					</div>
-				</aside>
-
-				<div className="dashboard-main-offset flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
-					<header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/75 px-4 py-4 backdrop-blur-xl sm:px-6 xl:px-8">
-						<div className="flex items-center gap-3 xl:hidden">
-							<button className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700"><FiMenu className="h-5 w-5" /></button>
-							<div className="flex min-w-0 items-center gap-3">
-								<span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#0f51ff] text-xs font-black text-white">A</span>
-								<div className="min-w-0">
-									<div className="truncate text-sm font-extrabold text-slate-900">ShiftSync</div>
-									<div className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Workforce Management</div>
-								</div>
-							</div>
-						</div>
-
-						<div className="mt-4 flex flex-col gap-4 xl:mt-0 xl:flex-row xl:items-center xl:justify-between">
-							<label className="relative w-full max-w-3xl">
-								<FiSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-								<input type="search" placeholder="Search users, roles, and groups..." className="h-12 w-full rounded-full border border-slate-200/80 bg-[#f5f7ff] px-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#0f51ff] focus:bg-white" />
-							</label>
-
-							<div className="flex items-center justify-between gap-3 xl:justify-end">
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiBell className="h-4 w-4" /></button>
-								<button className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"><FiMoon className="h-4 w-4" /></button>
-								<div className="flex items-center gap-3 rounded-full bg-white px-3 py-2">
-									<div className="text-right leading-tight">
-										<div className="text-sm font-bold text-slate-900">Nina Patel</div>
-										<div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">System Admin</div>
-									</div>
-									<div className="h-10 w-10 overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f51ff,#7ea4ff)] ring-2 ring-[#eef3ff]" />
-									<FiChevronDown className="h-4 w-4 text-slate-400" />
-								</div>
-							</div>
-						</div>
-					</header>
-
-					<div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
-						<section>
-							<div className="flex flex-wrap items-start justify-between gap-3">
-								<div>
-									<div className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#2948b8]">System Governance</div>
-									<h1 className="mt-2 text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-4xl">User Management</h1>
-									<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 sm:text-base">Oversee access controls, define organizational roles, and monitor account statuses across the global workforce directory.</p>
-								</div>
-								<div className="flex items-center gap-2">
-									<button className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-[#eef2ff] px-4 text-xs font-bold text-[#1f3b9c] transition hover:bg-[#e3eafe]"><FiDownload className="h-4 w-4" /> Export Directory</button>
-									<button className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0f51ff] px-4 text-xs font-bold text-white transition hover:bg-[#0b44de]"><FiPlus className="h-4 w-4" /> Add New User</button>
-								</div>
-							</div>
-
-							<div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-								{summaryCards.map((item) => (
-									<article key={item.label} className="rounded-2xl border border-slate-200/80 bg-white p-4">
-										<div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-500">{item.label}</div>
-										<div className={`mt-2 text-[38px] font-black leading-none tracking-[-0.06em] ${item.valueTone || 'text-slate-950'}`}>{item.value}</div>
-										<div className={`mt-1 text-xs font-semibold ${item.detailTone}`}>{item.detail}</div>
-									</article>
-								))}
-							</div>
-
-							<article className="mt-5 overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
-								<div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-[#f7f9ff] px-4 py-4 sm:px-5">
-									<div className="flex flex-wrap items-center gap-2">
-										<button className="rounded-full bg-[#0f51ff] px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-white">All Roles</button>
-										<button className="rounded-full bg-[#e8edff] px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#2847ad]">Admin</button>
-										<button className="rounded-full bg-[#e8edff] px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#2847ad]">Manager</button>
-										<button className="rounded-full bg-[#e8edff] px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#2847ad]">Employee</button>
-									</div>
-									<div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-										<span>Showing 1-10 of 1,284</span>
-										<button className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600"><FiChevronLeft className="h-3.5 w-3.5" /></button>
-										<button className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600"><FiChevronRight className="h-3.5 w-3.5" /></button>
-									</div>
-								</div>
-
-								<div className="overflow-x-auto">
-									<table className="min-w-full text-left">
-										<thead className="border-b border-slate-100 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">
-											<tr>
-												<th className="px-5 py-4">User Identity</th>
-												<th className="px-5 py-4">Privilege Level</th>
-												<th className="px-5 py-4">Availability</th>
-												<th className="px-5 py-4">Actions</th>
-											</tr>
-										</thead>
-										<tbody className="text-sm text-slate-700">
-											{users.map((user) => (
-												<tr key={user.email} className="border-b border-slate-100 last:border-b-0">
-													<td className="px-5 py-4">
-														<div className="flex items-center gap-3">
-															<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e7ecff] text-xs font-extrabold text-[#2243ae]">{user.avatar}</div>
-															<div>
-																<div className="font-bold text-slate-900">{user.name}</div>
-																<div className="text-xs text-slate-500">{user.email}</div>
-															</div>
-														</div>
-													</td>
-													<td className="px-5 py-4">
-														<span className="rounded-full bg-[#e9efff] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#2645af]">{user.role}</span>
-													</td>
-													<td className="px-5 py-4">
-														<span className={`inline-flex items-center gap-2 text-sm ${user.active ? 'text-[#1b49cb]' : 'text-slate-400'}`}>
-															<span className={`h-2 w-2 rounded-full ${user.active ? 'bg-[#1b49cb]' : 'bg-slate-300'}`} />
-															{user.active ? 'Active' : 'Inactive'}
-														</span>
-													</td>
-													<td className="px-5 py-4">
-														<button className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:border-[#0f51ff] hover:text-[#0f51ff]">Manage</button>
-													</td>
-												</tr>
-											))}
-										</tbody>
-									</table>
-								</div>
-							</article>
-						</section>
+					<div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+						<FiUsers className="h-4 w-4 text-[#0f51ff]" />
+						<span>{filteredUsers.length} users shown</span>
 					</div>
 				</div>
-			</div>
-		</main>
+
+				<div className="overflow-x-auto">
+					<table className="min-w-full text-left">
+						<thead className="border-b border-slate-100 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">
+							<tr>
+								<th className="px-5 py-4">User Identity</th>
+								<th className="px-5 py-4">Role</th>
+								<th className="px-5 py-4">Workspace</th>
+								<th className="px-5 py-4">Status</th>
+								<th className="px-5 py-4">Credentials</th>
+							</tr>
+						</thead>
+						<tbody className="text-sm text-slate-700">
+							{filteredUsers.map((user) => (
+								<tr key={user.id} className="border-b border-slate-100 last:border-b-0">
+									<td className="px-5 py-4">
+										<div className="flex items-center gap-3">
+											<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e7ecff] text-xs font-extrabold text-[#2243ae]">
+												{toInitials(user.fullName)}
+											</div>
+											<div>
+												<div className="font-bold text-slate-900">{user.fullName}</div>
+												<div className="text-xs text-slate-500">{user.email}</div>
+											</div>
+										</div>
+									</td>
+									<td className="px-5 py-4">
+										<div className="flex items-center gap-2">
+											<select
+												className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0f51ff]"
+												onChange={(event) => setPendingRoles((current) => ({ ...current, [user.id]: event.target.value }))}
+												value={getPendingRole(user)}
+											>
+												<option value="ADMIN">ADMIN</option>
+												<option value="MANAGER">MANAGER</option>
+												<option value="EMPLOYEE">EMPLOYEE</option>
+											</select>
+											<button
+												className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:border-[#0f51ff] hover:text-[#0f51ff]"
+												disabled={busyUserId === user.id || getPendingRole(user) === user.role.toUpperCase()}
+												onClick={() => handleRoleSave(user)}
+												type="button"
+											>
+												{busyUserId === user.id ? 'Saving...' : 'Save'}
+											</button>
+										</div>
+									</td>
+									<td className="px-5 py-4 text-sm text-slate-600">{user.branchLabel}</td>
+									<td className="px-5 py-4">
+										<div className="flex items-center justify-between gap-3">
+											<span className={`inline-flex items-center gap-2 text-sm ${user.active ? 'text-[#1b49cb]' : 'text-slate-400'}`}>
+												<span className={`h-2 w-2 rounded-full ${user.active ? 'bg-[#1b49cb]' : 'bg-slate-300'}`} />
+												{user.active ? 'Active' : 'Inactive'}
+											</span>
+											<button
+												className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition ${
+													user.active
+														? 'border-rose-200 bg-rose-50 text-rose-600 hover:border-rose-300'
+														: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300'
+												}`}
+												disabled={busyUserId === user.id}
+												onClick={() => handleToggleUser(user)}
+												type="button"
+											>
+												{busyUserId === user.id ? 'Saving...' : user.active ? 'Deactivate' : 'Activate'}
+											</button>
+										</div>
+									</td>
+									<td className="px-5 py-4">
+										<button
+											className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:border-[#0f51ff] hover:text-[#0f51ff]"
+											disabled={busyResetUserId === user.id}
+											onClick={() => handleResetCredentials(user)}
+											type="button"
+										>
+											{busyResetUserId === user.id ? 'Resetting...' : 'Reset login'}
+										</button>
+									</td>
+								</tr>
+							))}
+							{filteredUsers.length === 0 ? (
+								<tr>
+									<td colSpan="5" className="px-5 py-10 text-center text-sm text-slate-500">
+										No users matched the current search or role filter.
+									</td>
+								</tr>
+							) : null}
+						</tbody>
+					</table>
+				</div>
+			</article>
+		</AdminFrame>
 	)
 }

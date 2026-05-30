@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
 	FiBell,
 	FiCalendar,
@@ -7,6 +7,7 @@ import {
 	FiChevronLeft,
 	FiChevronRight,
 	FiClock,
+	FiDownload,
 	FiEdit2,
 	FiHome,
 	FiLayers,
@@ -23,14 +24,16 @@ import {
 	FiPieChart,
 } from 'react-icons/fi'
 import { Link, useNavigate } from 'react-router-dom'
+import ExportPickerModal from '../shared/ExportPickerModal.jsx'
 import {
-	archiveManagedEmployee,
 	createManagedEmployee,
 	fetchManagedEmployeeDetail,
 	resolveProfileImage,
 	updateManagedEmployee,
+	updateManagedEmployeeStatus,
 	useManagerWorkspace,
 } from '../../lib/managerWorkspace'
+import { executeProfileExport, PROFILE_EXPORT_OPTIONS } from '../../lib/profileExports'
 import { clearSession } from '../../lib/session'
 import ManagerProfileMenu from '../shared/ManagerProfileMenu'
 import MobileManagerMenu from '../shared/MobileManagerMenu'
@@ -72,6 +75,14 @@ export default function Profiles() {
 	const [isDetailLoading, setIsDetailLoading] = useState(false)
 	const [isSaving, setIsSaving] = useState(false)
 	const [isArchiving, setIsArchiving] = useState(false)
+	const [isReactivating, setIsReactivating] = useState(false)
+	const [rosterFilter, setRosterFilter] = useState('active')
+	const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false)
+	const [showExportModal, setShowExportModal] = useState(false)
+	const [exportType, setExportType] = useState('roster')
+	const [exportFormat, setExportFormat] = useState('csv')
+	const [exportError, setExportError] = useState('')
+	const [isExporting, setIsExporting] = useState(false)
 	const [actionError, setActionError] = useState('')
 	const [actionMessage, setActionMessage] = useState('')
 	const detailRequestRef = useRef(0)
@@ -84,6 +95,13 @@ export default function Profiles() {
 
 	const roster = workspace.profiles.roster
 	const filteredRoster = roster.filter((employee) => {
+		if (rosterFilter === 'active' && employee.active === false) {
+			return false
+		}
+		if (rosterFilter === 'inactive' && employee.active !== false) {
+			return false
+		}
+
 		const query = searchTerm.trim().toLowerCase()
 		if (!query) {
 			return true
@@ -99,7 +117,7 @@ export default function Profiles() {
 
 	useEffect(() => {
 		setCurrentPage(1)
-	}, [searchTerm, roster.length])
+	}, [searchTerm, roster.length, rosterFilter])
 
 	useEffect(() => {
 		if (currentPage > totalPages) {
@@ -259,7 +277,7 @@ export default function Profiles() {
 		}
 	}
 
-	async function handleArchiveEmployee() {
+	async function handleDeactivateEmployee() {
 		if (!featured?.userId || !session?.userId) {
 			return
 		}
@@ -268,17 +286,39 @@ export default function Profiles() {
 			setIsArchiving(true)
 			setActionError('')
 			setActionMessage('')
-			await archiveManagedEmployee(featured.userId, { managerId: session.userId })
+			await updateManagedEmployeeStatus(featured.userId, { managerId: session.userId, active: false })
 			await reloadWorkspace()
 			setSelectedEmployeeId(null)
 			setFeatured(null)
 			setForm(emptyForm)
 			setIsEditing(false)
-			setActionMessage('Employee archived from the active roster.')
+			setShowDeactivateConfirm(false)
+			setActionMessage('Employee account deactivated. They can no longer sign in and future shifts were released.')
 		} catch (archiveError) {
-			setActionError(archiveError.message || 'Unable to archive this employee.')
+			setActionError(archiveError.message || 'Unable to deactivate this employee.')
 		} finally {
 			setIsArchiving(false)
+		}
+	}
+
+	async function handleReactivateEmployee() {
+		if (!featured?.userId || !session?.userId) {
+			return
+		}
+
+		try {
+			setIsReactivating(true)
+			setActionError('')
+			setActionMessage('')
+			await updateManagedEmployeeStatus(featured.userId, { managerId: session.userId, active: true })
+			const refreshedDetail = await fetchManagedEmployeeDetail(session.userId, featured.userId)
+			setFeatured(refreshedDetail)
+			await reloadWorkspace()
+			setActionMessage(`${refreshedDetail.name} was reactivated and can sign in again.`)
+		} catch (reactivateError) {
+			setActionError(reactivateError.message || 'Unable to reactivate this employee.')
+		} finally {
+			setIsReactivating(false)
 		}
 	}
 
@@ -323,38 +363,56 @@ export default function Profiles() {
 	}
 
 	function handleExportCsv() {
-		if (!filteredRoster.length) {
-			setActionError('There are no employee rows to export.')
-			return
-		}
-
-		const lines = [
-			['Name', 'Role', 'Department', 'Status', 'Shift'].join(','),
-			...filteredRoster.map((employee) =>
-				[
-					employee.name,
-					employee.role,
-					employee.department,
-					employee.status,
-					employee.shift,
-				]
-					.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`)
-					.join(',')
-			),
-		]
-
-		const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
-		const url = URL.createObjectURL(blob)
-		const link = document.createElement('a')
-		link.href = url
-		link.download = 'employee-roster.csv'
-		link.click()
-		URL.revokeObjectURL(url)
-		setActionMessage('Employee roster exported.')
-		setActionError('')
+		setExportError('')
+		setExportType(featured?.userId ? 'profile-dossier' : 'roster')
+		setExportFormat('csv')
+		setShowExportModal(true)
 	}
 
-	const detailBusy = isDetailLoading || isSaving || isArchiving
+	const profileExportPreview = useMemo(() => {
+		const lines = [`Branch: ${manager?.branchName || 'Ngabo Pharmacy'}`]
+		if (exportType === 'profile-dossier' && featured?.name) {
+			lines.push(`Employee: ${featured.name}`)
+			lines.push('Includes contact details, workload, expertise, and weekly availability.')
+		} else {
+			lines.push(`Rows in current filter: ${filteredRoster.length}`)
+			lines.push(`Filter: ${rosterFilter === 'all' ? 'All employees' : rosterFilter === 'inactive' ? 'Inactive only' : 'Active only'}`)
+		}
+		if (searchTerm.trim()) {
+			lines.push(`Search: ${searchTerm.trim()}`)
+		}
+		return lines
+	}, [exportType, featured?.name, filteredRoster.length, manager?.branchName, rosterFilter, searchTerm])
+
+	const disabledProfileExports = PROFILE_EXPORT_OPTIONS
+		.filter((option) => option.requiresSelection && !featured?.userId)
+		.map((option) => option.id)
+
+	async function handleConfirmExport() {
+		try {
+			setIsExporting(true)
+			setExportError('')
+			const summary = executeProfileExport({
+				type: exportType,
+				format: exportFormat,
+				roster: filteredRoster,
+				featured,
+				manager,
+				rosterFilter,
+				searchTerm,
+			})
+			setShowExportModal(false)
+			setActionMessage(summary)
+			setActionError('')
+		} catch (exportFailure) {
+			setExportError(exportFailure.message || 'Unable to prepare this export.')
+		} finally {
+			setIsExporting(false)
+		}
+	}
+
+	const detailBusy = isDetailLoading || isSaving || isArchiving || isReactivating
+	const isInactiveEmployee = featured?.active === false
 
 	return (
 		<main className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#eef4ff_0%,#f7f9ff_38%,#eef2ff_100%)] text-slate-900">
@@ -442,7 +500,14 @@ export default function Profiles() {
 									<p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">{workspace.profiles.summary || 'Loading roster data...'}</p>
 								</div>
 								<div className="flex flex-wrap items-center gap-3">
-									<button className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-[#0f51ff]" onClick={handleExportCsv} type="button">Export CSV</button>
+									<button
+										className="inline-flex items-center gap-2 rounded-xl bg-[#0f51ff] px-4 py-2.5 text-sm font-bold text-white shadow-[0_10px_24px_rgba(15,81,255,0.24)] transition hover:-translate-y-0.5 hover:bg-[#0b44de]"
+										onClick={handleExportCsv}
+										type="button"
+									>
+										<FiDownload className="h-4 w-4" />
+										Export
+									</button>
 									<button
 										className="rounded-xl bg-[#0f51ff] px-4 py-2 text-sm font-bold text-white"
 										onClick={() => {
@@ -455,15 +520,58 @@ export default function Profiles() {
 										{showCreateForm ? 'Close Form' : 'Add Employee'}
 									</button>
 									<button
-										className="rounded-xl bg-[#e8eeff] px-4 py-2 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-										disabled={!featured || isArchiving}
-										onClick={handleArchiveEmployee}
+										className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+										disabled={!featured || isInactiveEmployee || detailBusy}
+										onClick={() => setShowDeactivateConfirm(true)}
 										type="button"
 									>
-										Quick Archive
+										Deactivate
 									</button>
 								</div>
 							</div>
+
+							<div className="flex flex-wrap gap-2">
+								{[
+									{ key: 'active', label: 'Active' },
+									{ key: 'inactive', label: 'Inactive' },
+									{ key: 'all', label: 'All' },
+								].map((filter) => (
+									<button
+										key={filter.key}
+										className={`rounded-full px-4 py-2 text-sm font-bold transition ${rosterFilter === filter.key ? 'bg-[#0f51ff] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200'}`}
+										onClick={() => setRosterFilter(filter.key)}
+										type="button"
+									>
+										{filter.label}
+									</button>
+								))}
+							</div>
+
+							{showDeactivateConfirm ? (
+								<div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-900">
+									<div className="font-bold">Deactivate {featured?.name}?</div>
+									<p className="mt-2 text-rose-800">
+										This removes the employee from scheduling, blocks sign-in, and keeps their history for audit purposes. Accounts are not permanently deleted.
+									</p>
+									<div className="mt-4 flex flex-wrap gap-3">
+										<button
+											className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+											disabled={isArchiving}
+											onClick={handleDeactivateEmployee}
+											type="button"
+										>
+											{isArchiving ? 'Deactivating...' : 'Confirm deactivate'}
+										</button>
+										<button
+											className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-700"
+											onClick={() => setShowDeactivateConfirm(false)}
+											type="button"
+										>
+											Cancel
+										</button>
+									</div>
+								</div>
+							) : null}
 
 							{error ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div> : null}
 							{actionError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{actionError}</div> : null}
@@ -645,10 +753,14 @@ export default function Profiles() {
 													<div>
 														<h2 className="text-xl font-black tracking-[-0.04em] text-slate-950">{featured.name}</h2>
 														<p className="text-sm font-semibold text-[#0f51ff]">{featured.role} • Staff ID #{featured.employeeCode}</p>
+														{isInactiveEmployee ? (
+															<span className="mt-2 inline-flex rounded-full bg-rose-50 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.16em] text-rose-700">Inactive account</span>
+														) : null}
 													</div>
 												</div>
 												<div className="flex items-center gap-2 text-slate-500">
-													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-slate-100" onClick={() => setIsEditing((current) => !current)} type="button"><FiEdit2 className="h-4 w-4" /></button>
+													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-[#0f51ff]/30 hover:bg-[#eef3ff] hover:text-[#0f51ff]" onClick={handleExportCsv} title="Export profile" type="button"><FiDownload className="h-4 w-4" /></button>
+													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40" disabled={isInactiveEmployee || detailBusy} onClick={() => setIsEditing((current) => !current)} type="button"><FiEdit2 className="h-4 w-4" /></button>
 													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-slate-100" onClick={() => window.location.assign(`mailto:${featured.email}`)} type="button"><FiMail className="h-4 w-4" /></button>
 												</div>
 											</div>
@@ -710,17 +822,28 @@ export default function Profiles() {
 											</div>
 
 											<div className="mt-5 flex items-center gap-3">
-												<button
-													className="flex-1 rounded-xl bg-[#e8eeff] px-4 py-3 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-													disabled={detailBusy}
-													onClick={handleArchiveEmployee}
-													type="button"
-												>
-													{isArchiving ? 'Archiving...' : 'Archive'}
-												</button>
+												{isInactiveEmployee ? (
+													<button
+														className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+														disabled={detailBusy}
+														onClick={handleReactivateEmployee}
+														type="button"
+													>
+														{isReactivating ? 'Reactivating...' : 'Reactivate account'}
+													</button>
+												) : (
+													<button
+														className="flex-1 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+														disabled={detailBusy}
+														onClick={() => setShowDeactivateConfirm(true)}
+														type="button"
+													>
+														{isArchiving ? 'Deactivating...' : 'Deactivate account'}
+													</button>
+												)}
 												<button
 													className="flex-1 rounded-xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-													disabled={!isEditing || detailBusy}
+													disabled={!isEditing || detailBusy || isInactiveEmployee}
 													onClick={handleSaveChanges}
 													type="button"
 												>
@@ -737,6 +860,26 @@ export default function Profiles() {
 					</div>
 				</div>
 			</div>
+			{showExportModal ? (
+				<ExportPickerModal
+					title="Export Employee Data"
+					subtitle="Choose what to download from the pharmacy workforce directory."
+					options={PROFILE_EXPORT_OPTIONS}
+					selectedId={exportType}
+					onSelect={setExportType}
+					format={exportFormat}
+					onFormatChange={setExportFormat}
+					previewLines={profileExportPreview}
+					disabledOptionIds={disabledProfileExports}
+					isExporting={isExporting}
+					error={exportError}
+					onClose={() => {
+						setShowExportModal(false)
+						setExportError('')
+					}}
+					onExport={handleConfirmExport}
+				/>
+			) : null}
 		</main>
 	)
 }

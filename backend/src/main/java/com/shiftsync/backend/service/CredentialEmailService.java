@@ -68,6 +68,25 @@ public class CredentialEmailService {
         }
     }
 
+    public boolean sendAdminResetCredentials(String recipientEmail, String employeeName, String temporaryPassword) {
+        if (!isMailConfigured()) {
+            return false;
+        }
+
+        try {
+            var message = mailSender.createMimeMessage();
+            var helper = new MimeMessageHelper(message, false, "UTF-8");
+            helper.setTo(recipientEmail);
+            helper.setFrom(fromAddress);
+            helper.setSubject("ShiftSync account reset by admin");
+            helper.setText(buildAdminResetBody(employeeName, recipientEmail, temporaryPassword), false);
+            mailSender.send(message);
+            return true;
+        } catch (MailException | jakarta.mail.MessagingException exception) {
+            return false;
+        }
+    }
+
     public boolean sendUpcomingShiftReminder(String recipientEmail, String employeeName, Shift shift) {
         if (!isMailConfigured()) {
             return false;
@@ -138,6 +157,24 @@ public class CredentialEmailService {
             Sign in here: %s/login
 
             If you did not request this reset, please contact your manager right away.
+
+            Regards,
+            ShiftSync
+        """.formatted(employeeName, recipientEmail, temporaryPassword, frontendUrl);
+    }
+
+    private String buildAdminResetBody(String employeeName, String recipientEmail, String temporaryPassword) {
+        return """
+            Hello %s,
+
+            A ShiftSync administrator reset your account credentials.
+
+            Login email: %s
+            Temporary password: %s
+
+            Please sign in using this temporary password, then change it immediately before continuing.
+
+            Sign in here: %s/login
 
             Regards,
             ShiftSync

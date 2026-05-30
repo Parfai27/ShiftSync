@@ -1,3 +1,35 @@
+function escapeCsvCell(value) {
+	return `"${String(value ?? '').replace(/"/g, '""')}"`
+}
+
+export function rowsToCsv(rows) {
+	return rows.map((row) => row.map(escapeCsvCell).join(',')).join('\n')
+}
+
+export function buildDatedFilename(prefix, extension) {
+	const stamp = new Date().toISOString().slice(0, 10)
+	return `${prefix}-${stamp}.${extension}`
+}
+
+export function downloadText(content, filename, mimeType = 'text/plain;charset=utf-8;') {
+	const blob = new Blob([content], { type: mimeType })
+	const url = URL.createObjectURL(blob)
+	const link = document.createElement('a')
+	link.href = url
+	link.download = filename
+	link.click()
+	URL.revokeObjectURL(url)
+}
+
+export function downloadCsv(rows, filename) {
+	const content = typeof rows === 'string' ? rows : rowsToCsv(rows)
+	downloadText(content, filename, 'text/csv;charset=utf-8;')
+}
+
+export function downloadJson(data, filename) {
+	downloadText(JSON.stringify(data, null, 2), filename, 'application/json;charset=utf-8;')
+}
+
 function collectStyleText() {
 	return Array.from(document.styleSheets)
 		.flatMap((sheet) => {
@@ -34,16 +66,6 @@ export function exportElementAsSvg(element, filename) {
 		</svg>
 	`
 	const blob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' })
-	const url = URL.createObjectURL(blob)
-	const link = document.createElement('a')
-	link.href = url
-	link.download = filename
-	link.click()
-	URL.revokeObjectURL(url)
-}
-
-export function downloadCsv(rows, filename) {
-	const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' })
 	const url = URL.createObjectURL(blob)
 	const link = document.createElement('a')
 	link.href = url

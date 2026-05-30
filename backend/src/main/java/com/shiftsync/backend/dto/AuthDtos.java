@@ -10,8 +10,12 @@ public final class AuthDtos {
 
     public record LoginRequest(
         @NotBlank String email,
-        @NotBlank String password
+        @NotBlank String password,
+        Boolean remember
     ) {
+        public boolean rememberMe() {
+            return Boolean.TRUE.equals(remember);
+        }
     }
 
     public record RegisterRequest(
@@ -45,6 +49,16 @@ public final class AuthDtos {
         Long branchId,
         String profileImageUrl,
         boolean mustChangePassword,
+        String token,
+        String tokenExpiresAt,
+        String message
+    ) {
+    }
+
+    public record SessionValidationResponse(
+        Long userId,
+        String email,
+        Role role,
         String message
     ) {
     }

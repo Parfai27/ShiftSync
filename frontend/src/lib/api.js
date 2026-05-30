@@ -1,13 +1,27 @@
+import { clearSession, loadSession } from './session'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 export async function apiRequest(path, options = {}) {
+	const session = loadSession()
+	const headers = {
+		'Content-Type': 'application/json',
+		...(options.headers || {}),
+	}
+
+	if (session?.token) {
+		headers.Authorization = `Bearer ${session.token}`
+	}
+
 	const response = await fetch(`${API_BASE}${path}`, {
-		headers: {
-			'Content-Type': 'application/json',
-			...(options.headers || {}),
-		},
+		headers,
 		...options,
 	})
+
+	if (response.status === 401) {
+		clearSession()
+		throw new Error('Your session has expired. Please sign in again.')
+	}
 
 	if (!response.ok) {
 		let message = 'Request failed'

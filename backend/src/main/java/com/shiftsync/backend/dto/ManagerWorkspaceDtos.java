@@ -24,7 +24,8 @@ public final class ManagerWorkspaceDtos {
         String status,
         String shift,
         String avatar,
-        String tone
+        String tone,
+        boolean active
     ) {
     }
 
@@ -40,7 +41,8 @@ public final class ManagerWorkspaceDtos {
         String location,
         String workload,
         List<String> expertise,
-        List<Boolean> weeklyAvailability
+        List<Boolean> weeklyAvailability,
+        boolean active
     ) {
     }
 

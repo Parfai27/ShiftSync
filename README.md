@@ -22,31 +22,31 @@ A comprehensive workforce management platform designed to streamline employee sc
 - **System Settings** - Configure system preferences and security settings
 
 ### System Features
-- **Authentication** - Secure login with password management and first-login password change requirement
-- **Session Management** - Persistent user sessions with security controls
+- **Authentication** - JWT Bearer tokens with BCrypt password hashing and role-based API access
+- **Session Management** - Client-side session storage with idle timeout; server validates JWT on every request
 - **Email Notifications** - Automated credential delivery and system notifications
-- **Data Export** - CSV and SVG export capabilities for schedules and reports
+- **Data Export** - CSV, JSON, and SVG export capabilities for schedules and reports
 - **Responsive Design** - Mobile-friendly interface optimized for all screen sizes
-- **Real-time Updates** - Live data synchronization with backend API
 
 ## 🛠️ Tech Stack
 
 ### Backend
-- **Language:** Java 17
-- **Framework:** Spring Boot 3.x
-- **Database:** JPA/Hibernate (configurable database)
+- **Language:** Java 21
+- **Framework:** Spring Boot 3.3
+- **Database:** PostgreSQL with Spring Data JPA / Hibernate
+- **Security:** Spring Security + JWT (jjwt)
 - **Build Tool:** Maven
 - **Email:** Spring Mail (SMTP)
-- **API:** RESTful API with JSON
+- **API:** RESTful JSON API with OpenAPI / Swagger UI
 
 ### Frontend
-- **Framework:** React 18+
-- **Build Tool:** Vite
-- **Styling:** Tailwind CSS
+- **Framework:** React 19
+- **Build Tool:** Vite 8
+- **Styling:** Tailwind CSS 4
 - **Icons:** Feather Icons (react-icons)
-- **Routing:** React Router v6
+- **Routing:** React Router v7
 - **State Management:** React Hooks
-- **HTTP Client:** Native Fetch API
+- **HTTP Client:** Native Fetch API with Bearer token injection
 
 ## 📁 Project Structure
 
@@ -89,10 +89,10 @@ ShiftSync/
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Java 17 or higher
-- Node.js 16+ and npm
-- Maven 3.6+
-- A database (MySQL, PostgreSQL, etc.)
+- Java 21 (JDK)
+- Node.js 18+ and npm
+- Maven 3.9+
+- PostgreSQL 14+
 - SMTP server for email notifications (optional)
 
 ### Backend Setup
@@ -102,24 +102,27 @@ ShiftSync/
    cd backend
    ```
 
-2. **Configure database connection** in `src/main/resources/application.properties`:
-   ```properties
-   spring.datasource.url=jdbc:mysql://localhost:3306/shiftsync
-   spring.datasource.username=root
-   spring.datasource.password=your_password
-   spring.jpa.hibernate.ddl-auto=update
+2. **Create the PostgreSQL database:**
+   ```sql
+   CREATE DATABASE shiftsync;
    ```
 
-3. **Configure email (optional)** in `application.properties`:
-   ```properties
-   spring.mail.host=smtp.gmail.com
-   spring.mail.port=587
-   spring.mail.username=your_email@gmail.com
-   spring.mail.password=your_app_password
-   app.frontend.url=http://localhost:5173
+3. **Configure environment variables** (or edit `src/main/resources/application.properties`):
+   ```powershell
+   $env:SHIFT_SYNC_DB_URL="jdbc:postgresql://localhost:5432/shiftsync"
+   $env:SHIFT_SYNC_DB_USERNAME="postgres"
+   $env:SHIFT_SYNC_DB_PASSWORD="your_password"
+   $env:SHIFT_SYNC_JWT_SECRET="use-a-long-random-secret-at-least-32-characters"
    ```
 
-4. **Build and run:**
+4. **Configure email (optional):**
+   ```powershell
+   $env:SHIFT_SYNC_MAIL_USERNAME="your_email@gmail.com"
+   $env:SHIFT_SYNC_MAIL_PASSWORD="your_app_password"
+   $env:SHIFT_SYNC_FRONTEND_URL="http://localhost:5173"
+   ```
+
+5. **Build and run:**
    ```bash
    mvn clean install
    mvn spring-boot:run
@@ -127,7 +130,7 @@ ShiftSync/
 
    Or use the provided script:
    ```bash
-   ./start-backend.cmd
+   backend\start-backend.cmd
    ```
 
    Backend runs on `http://localhost:8080`
@@ -159,9 +162,9 @@ ShiftSync/
 ## 📡 API Endpoints
 
 ### Authentication
-- `POST /api/auth/login` - User login
-- `POST /api/auth/change-password` - Change password
-- `GET /api/auth/validate` - Validate session
+- `POST /api/auth/login` - User login (returns JWT)
+- `POST /api/auth/change-password` - Change password (authenticated)
+- `GET /api/auth/validate` - Validate Bearer token
 
 ### Employee Endpoints
 - `GET /api/employee/dashboard/{userId}` - Dashboard overview
@@ -188,14 +191,14 @@ ShiftSync/
 
 ## 🔐 Security Features
 
-- Password hashing with bcrypt
-- JWT token authentication (if implemented)
-- Role-based access control (RBAC)
+- Password hashing with BCrypt
+- JWT Bearer token authentication (stateless API)
+- Role-based access control (RBAC) on admin and manager endpoints
+- `@PreAuthorize` enforcement on admin and manager controllers
 - First-login password change requirement
-- Session management
-- CSRF protection
-- Input validation
-- SQL injection prevention (via parameterized queries)
+- Client-side session timeout with server-side token validation
+- Input validation on DTOs
+- SQL injection prevention via parameterized JPA queries
 
 ## 🗄️ Database Models
 
@@ -264,6 +267,6 @@ For issues and questions:
 
 ---
 
-**Last Updated:** May 10, 2026
+**Last Updated:** May 24, 2026
 
 For the latest updates, visit the [GitHub Repository](https://github.com/Parfai27/ShiftSync)

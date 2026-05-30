@@ -46,6 +46,14 @@ public final class ManagerActionDtos {
     ) {
     }
 
+    public record EmployeeStatusUpdateRequest(
+        @NotNull(message = "Manager session is required.")
+        Long managerId,
+        @NotNull(message = "Account status is required.")
+        Boolean active
+    ) {
+    }
+
     public record EmployeeCreateRequest(
         @NotNull(message = "Manager session is required.")
         Long managerId,

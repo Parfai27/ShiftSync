@@ -21,6 +21,8 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { clearSession } from '../../lib/session'
 import { resolveProfileImage, useManagerWorkspace } from '../../lib/managerWorkspace'
+import { executeReportExport, REPORT_EXPORT_OPTIONS } from '../../lib/reportExports'
+import ExportPickerModal from '../shared/ExportPickerModal.jsx'
 import ManagerProfileMenu from '../shared/ManagerProfileMenu'
 import MobileManagerMenu from '../shared/MobileManagerMenu'
 import ThemeToggleButton from '../shared/ThemeToggleButton'
@@ -114,6 +116,12 @@ export default function Reports() {
 	const [exportLabel, setExportLabel] = useState('')
 	const [showAllLogs, setShowAllLogs] = useState(false)
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+	const [showExportModal, setShowExportModal] = useState(false)
+	const [exportType, setExportType] = useState('executive-summary')
+	const [exportFormat, setExportFormat] = useState('csv')
+	const [exportScope, setExportScope] = useState('full')
+	const [exportError, setExportError] = useState('')
+	const [isExporting, setIsExporting] = useState(false)
 
 	const normalizedSearch = searchTerm.trim().toLowerCase()
 	const metricsToShow = useMemo(() => {
@@ -155,35 +163,58 @@ export default function Reports() {
 		return showAllLogs ? filteredCompliance : filteredCompliance.slice(0, 5)
 	}, [filteredCompliance, showAllLogs])
 
-	function buildExportRows() {
-		return [
-			['Employee', 'Identifier', 'Shift Date', 'Department', 'Punch In', 'Status'],
-			...filteredCompliance.map((row) => [row.name, row.id, row.date, row.department, row.punchIn, row.status]),
+	const reportExportPreview = useMemo(() => {
+		const lines = [
+			`Branch: ${manager?.branchName || 'Ngabo Pharmacy'}`,
+			`Reporting window: current 7-day coverage view`,
 		]
+
+		if (exportType === 'executive-summary') {
+			lines.push(`Metrics included: ${reports.metrics.length}`)
+			lines.push(`Capacity score: ${reports.capacityPercent}%`)
+		} else if (exportType === 'weekly-coverage') {
+			lines.push(`Coverage days: ${reports.weekLabels.length}`)
+		} else if (exportType === 'department-mix') {
+			lines.push(`Departments tracked: ${reports.distribution.length}`)
+		} else if (exportType === 'compliance-log') {
+			const count = exportScope === 'filtered' ? filteredCompliance.length : reports.recentCompliance.length
+			lines.push(`Compliance rows: ${count}`)
+		} else {
+			lines.push('Includes summary, coverage trend, department mix, and compliance log.')
+		}
+
+		if (searchTerm.trim()) {
+			lines.push(`Search context: ${searchTerm.trim()}`)
+		}
+
+		return lines
+	}, [exportScope, exportType, filteredCompliance.length, manager?.branchName, reports, searchTerm])
+
+	function openExportModal() {
+		setExportError('')
+		setShowExportModal(true)
 	}
 
-	function downloadFile(content, mimeType, extension) {
-		const blob = new Blob([content], { type: mimeType })
-		const url = URL.createObjectURL(blob)
-		const link = document.createElement('a')
-		link.href = url
-		link.download = `reports-analytics.${extension}`
-		link.click()
-		URL.revokeObjectURL(url)
-		setExportLabel(`Snapshot exported as ${extension.toUpperCase()}.`)
-		window.setTimeout(() => setExportLabel(''), 2000)
-	}
-
-	function exportCsv() {
-		const rows = buildExportRows()
-		const csv = rows
-			.map((row) => row.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(','))
-			.join('\n')
-		downloadFile(csv, 'text/csv;charset=utf-8;', 'csv')
-	}
-
-	function exportSnapshot() {
-		exportCsv()
+	async function handleConfirmReportExport() {
+		try {
+			setIsExporting(true)
+			setExportError('')
+			const summary = executeReportExport({
+				type: exportType,
+				format: exportFormat,
+				reports,
+				manager,
+				searchTerm,
+				scope: exportType === 'compliance-log' ? exportScope : 'full',
+			})
+			setShowExportModal(false)
+			setExportLabel(summary)
+			window.setTimeout(() => setExportLabel(''), 3000)
+		} catch (exportFailure) {
+			setExportError(exportFailure.message || 'Unable to prepare this report export.')
+		} finally {
+			setIsExporting(false)
+		}
 	}
 
 	return (
@@ -192,8 +223,8 @@ export default function Reports() {
 				activePath="/reports"
 				isOpen={isMobileMenuOpen}
 				onClose={() => setIsMobileMenuOpen(false)}
-				onPrimaryAction={exportSnapshot}
-				primaryActionLabel="Export Snapshot"
+				onPrimaryAction={openExportModal}
+				primaryActionLabel="Export Reports"
 			/>
 			<div className="flex h-screen w-full overflow-hidden border border-white/80 bg-white/85 backdrop-blur-xl">
 				<aside className="flex w-full shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-[#f2f6ff]/80 px-5 py-6 xl:fixed xl:left-0 xl:top-0 xl:h-screen" style={{ width: '264px', maxWidth: '264px' }}>
@@ -208,7 +239,7 @@ export default function Reports() {
 						<Link className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 font-semibold text-[#0f51ff]" to="/reports"><FiPieChart className="h-4 w-4" /> Reports & Analytics</Link>
 					</nav>
 					<div className="mt-auto space-y-3 pt-8">
-						<button className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:bg-[#0b44de]" onClick={exportSnapshot} type="button"><FiPlus className="h-4 w-4" /> Export Snapshot</button>
+						<button className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:bg-[#0b44de]" onClick={openExportModal} type="button"><FiDownload className="h-4 w-4" /> Export Reports</button>
 						<div className="space-y-1 text-sm text-slate-600"><Link className="flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-white/70" to="/manager-settings"><FiSettings className="h-4 w-4" /> Settings</Link><Link className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold text-rose-600 hover:bg-rose-50" to="/login" onClick={clearSession}><FiLogOut className="h-4 w-4" /> Logout</Link></div>
 					</div>
 				</aside>
@@ -226,6 +257,17 @@ export default function Reports() {
 						<section className="space-y-5">
 							{error ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div> : null}
 							{exportLabel ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{exportLabel}</div> : null}
+
+							<div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+								<div>
+									<h1 className="text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-4xl">Reports & Analytics</h1>
+									<p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">{reports.summary || 'Loading analytics...'}</p>
+								</div>
+								<button className="inline-flex items-center gap-2 rounded-xl bg-[#0f51ff] px-4 py-2.5 text-sm font-bold text-white shadow-[0_10px_24px_rgba(15,81,255,0.24)] transition hover:-translate-y-0.5 hover:bg-[#0b44de]" onClick={openExportModal} type="button">
+									<FiDownload className="h-4 w-4" />
+									Export Reports
+								</button>
+							</div>
 
 							<div className="grid gap-4 xl:grid-cols-3">
 								{metricsToShow.map((item) => (
@@ -435,6 +477,41 @@ export default function Reports() {
 						</div>
 					</div>
 				</div>
+			) : null}
+			{showExportModal ? (
+				<ExportPickerModal
+					title="Export Weekly Reports"
+					subtitle="Pick the analysis you need, then download a structured CSV or JSON file."
+					options={REPORT_EXPORT_OPTIONS}
+					selectedId={exportType}
+					onSelect={(nextType) => {
+						setExportType(nextType)
+						const nextOption = REPORT_EXPORT_OPTIONS.find((option) => option.id === nextType)
+						if (nextOption?.formats?.length === 1 && nextOption.formats[0] === 'csv') {
+							setExportFormat('csv')
+						}
+					}}
+					format={exportFormat}
+					onFormatChange={setExportFormat}
+					scope={exportScope}
+					onScopeChange={setExportScope}
+					scopeOptions={
+						exportType === 'compliance-log'
+							? [
+									{ id: 'full', label: 'Full log' },
+									{ id: 'filtered', label: 'Current search' },
+								]
+							: []
+					}
+					previewLines={reportExportPreview}
+					isExporting={isExporting}
+					error={exportError}
+					onClose={() => {
+						setShowExportModal(false)
+						setExportError('')
+					}}
+					onExport={handleConfirmReportExport}
+				/>
 			) : null}
 		</main>
 	)

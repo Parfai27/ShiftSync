@@ -113,4 +113,17 @@
 	html[data-theme='dark'] input::placeholder {
 		color: #64748b;
 	}
+
+	html[data-theme='dark'] .export-modal-panel {
+		background-color: rgba(15, 23, 42, 0.98) !important;
+		border-color: rgba(71, 85, 105, 0.75) !important;
+	}
+
+	html[data-theme='dark'] .export-modal-panel .bg-\[\#eef3ff\] {
+		background-color: rgba(37, 99, 235, 0.18) !important;
+	}
+
+	html[data-theme='dark'] .export-modal-backdrop {
+		background-color: rgba(2, 6, 23, 0.72) !important;
+	}
 }

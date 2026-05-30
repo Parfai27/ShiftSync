@@ -42,6 +42,7 @@ import com.shiftsync.backend.dto.ManagerActionDtos.CompliancePolicyStatusUpdateR
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeCreateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeCreateResponse;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeArchiveRequest;
+import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeStatusUpdateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeUpdateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.NotificationUpdateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.SettingsUpdateRequest;
@@ -150,8 +151,11 @@ public class ManagerWorkspaceService {
         List<User> branchEmployees = userRepository.findByRole(Role.EMPLOYEE).stream()
             .filter(user -> manager.getBranch() != null && user.getBranch() != null)
             .filter(user -> manager.getBranch().getId().equals(user.getBranch().getId()))
-            .filter(User::isActive)
             .sorted(Comparator.comparing(User::getFullName))
+            .toList();
+
+        List<User> activeEmployees = branchEmployees.stream()
+            .filter(User::isActive)
             .toList();
 
         List<Shift> branchShifts = shiftRepository.findByBranchId(manager.getBranch().getId()).stream()
@@ -180,11 +184,11 @@ public class ManagerWorkspaceService {
         return new ManagerWorkspaceResponse(
             buildIdentity(manager),
             buildProfilesSection(manager, branchEmployees, branchShifts, assignments, profilesByUserId),
-            buildSchedulingSection(branchEmployees, branchShifts, assignments, safeRangeDays),
+            buildSchedulingSection(activeEmployees, branchShifts, assignments, safeRangeDays),
             buildAdjustmentsSection(adjustments, auditLogs),
             buildNotificationsSection(managerNotifications, adjustments, policies),
             buildComplianceSection(branchShifts, policies, auditLogs),
-            buildReportsSection(branchEmployees, branchShifts, assignments, profilesByUserId),
+            buildReportsSection(activeEmployees, branchShifts, assignments, profilesByUserId),
             buildSettingsSection(manager, policies)
         );
     }
@@ -353,7 +357,7 @@ public class ManagerWorkspaceService {
 
     public EmployeeDetail getEmployeeDetail(Long managerId, Long employeeId) {
         User manager = requireManager(managerId);
-        User employee = requireManagedEmployee(manager, employeeId);
+        User employee = requireBranchEmployee(manager, employeeId);
         Map<Long, EmployeeProfile> profilesByUserId = new HashMap<>();
         employeeProfileRepository.findByUserId(employee.getId()).ifPresent(profile -> profilesByUserId.put(employee.getId(), profile));
 
@@ -408,19 +412,51 @@ public class ManagerWorkspaceService {
 
     @Transactional
     public void archiveEmployee(Long employeeId, EmployeeArchiveRequest request) {
-        User manager = requireManager(request.managerId());
-        User employee = requireManagedEmployee(manager, employeeId);
+        updateEmployeeStatus(employeeId, new EmployeeStatusUpdateRequest(request.managerId(), false));
+    }
 
-        employee.setActive(false);
+    @Transactional
+    public void updateEmployeeStatus(Long employeeId, EmployeeStatusUpdateRequest request) {
+        User manager = requireManager(request.managerId());
+        User employee = requireBranchEmployee(manager, employeeId);
+
+        if (employee.isActive() == request.active()) {
+            return;
+        }
+
+        employee.setActive(request.active());
         userRepository.save(employee);
+
+        if (!request.active()) {
+            releaseFutureShiftAssignments(employee);
+            notificationRepository.save(
+                Notification.builder()
+                    .title("Account deactivated")
+                    .message("Your ShiftSync account was deactivated by " + manager.getFullName() + ". Contact your manager if you believe this is a mistake.")
+                    .priority(NotificationPriority.HIGH)
+                    .recipient(employee)
+                    .read(false)
+                    .build()
+            );
+        } else {
+            notificationRepository.save(
+                Notification.builder()
+                    .title("Account reactivated")
+                    .message("Your ShiftSync account was reactivated by " + manager.getFullName() + ". You can sign in again with your existing credentials.")
+                    .priority(NotificationPriority.MEDIUM)
+                    .recipient(employee)
+                    .read(false)
+                    .build()
+            );
+        }
 
         auditLogRepository.save(
             AuditLog.builder()
                 .actor(manager)
-                .action("Archived employee")
+                .action(request.active() ? "Reactivated employee account" : "Deactivated employee account")
                 .targetModule("Profiles")
                 .actionTime(java.time.LocalDateTime.now())
-                .details("Archived " + employee.getFullName() + " from the active pharmacy team")
+                .details((request.active() ? "Reactivated " : "Deactivated ") + employee.getFullName() + " (" + employee.getEmail() + ")")
                 .build()
         );
     }
@@ -677,6 +713,20 @@ public class ManagerWorkspaceService {
                     .min(Comparator.comparing(Shift::getShiftDate).thenComparing(Shift::getStartTime))
                     .orElse(null);
 
+                if (!employee.isActive()) {
+                    return new RosterItem(
+                        employee.getId(),
+                        employee.getFullName(),
+                        profile != null ? profile.getJobTitle() : "Pharmacy Staff",
+                        resolveDepartment(profile),
+                        "INACTIVE",
+                        "---",
+                        initials(employee.getFullName()),
+                        "bg-rose-50 text-rose-700",
+                        false
+                    );
+                }
+
                 String status = assignedShift == null ? "OFF-DUTY" : assignedShift.getStatus() == ShiftStatus.FULL ? "SCHEDULED" : "REVIEW";
                 String tone = "OFF-DUTY".equals(status) ? "bg-slate-100 text-slate-600" : "REVIEW".equals(status) ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700";
 
@@ -688,22 +738,35 @@ public class ManagerWorkspaceService {
                     status,
                     assignedShift == null ? "---" : formatShiftWindow(assignedShift),
                     initials(employee.getFullName()),
-                    tone
+                    tone,
+                    true
                 );
             })
             .toList();
 
-        User featured = employees.isEmpty() ? manager : employees.getFirst();
-        EmployeeProfile featuredProfile = profilesByUserId.get(featured.getId());
-        EmployeeDetail detail = buildEmployeeDetail(
-            manager,
-            featured,
-            assignments.stream().filter(item -> item.getEmployee().getId().equals(featured.getId())).toList(),
-            featuredProfile
-        );
+        User featuredEmployee = employees.stream()
+            .filter(User::isActive)
+            .findFirst()
+            .or(() -> employees.stream().findFirst())
+            .orElse(null);
+        long activeCount = employees.stream().filter(User::isActive).count();
+        long inactiveCount = employees.size() - activeCount;
+
+        EmployeeDetail detail = featuredEmployee == null
+            ? null
+            : buildEmployeeDetail(
+                manager,
+                featuredEmployee,
+                assignments.stream().filter(item -> item.getEmployee().getId().equals(featuredEmployee.getId())).toList(),
+                profilesByUserId.get(featuredEmployee.getId())
+            );
+
+        String summary = inactiveCount == 0
+            ? "Manage " + activeCount + " active pharmacy team members at " + manager.getBranch().getName() + "."
+            : "Manage " + activeCount + " active and " + inactiveCount + " inactive team members at " + manager.getBranch().getName() + ".";
 
         return new ProfilesSection(
-            "Manage " + employees.size() + " active pharmacy team members at " + manager.getBranch().getName() + ".",
+            summary,
             "Showing 1-" + employees.size() + " of " + employees.size() + " employees",
             roster,
             detail
@@ -1410,8 +1473,22 @@ public class ManagerWorkspaceService {
             manager.getBranch().getLocation(),
             workloadHours + "h / 40h weekly",
             expertiseForRole(profile != null ? profile.getJobTitle() : "Pharmacy Staff"),
-            weeklyAvailability(assignments, employee.getId())
+            weeklyAvailability(assignments, employee.getId()),
+            employee.isActive()
         );
+    }
+
+    private void releaseFutureShiftAssignments(User employee) {
+        LocalDate today = LocalDate.now();
+        List<ShiftAssignment> futureAssignments = shiftAssignmentRepository.findByEmployeeId(employee.getId()).stream()
+            .filter(assignment -> !assignment.getShift().getShiftDate().isBefore(today))
+            .toList();
+
+        if (futureAssignments.isEmpty()) {
+            return;
+        }
+
+        shiftAssignmentRepository.deleteAll(futureAssignments);
     }
 
     private User requireManager(Long managerId) {
@@ -1425,16 +1502,12 @@ public class ManagerWorkspaceService {
         return manager;
     }
 
-    private User requireManagedEmployee(User manager, Long employeeId) {
+    private User requireBranchEmployee(User manager, Long employeeId) {
         User employee = userRepository.findById(employeeId)
             .orElseThrow(() -> new IllegalArgumentException("Employee not found"));
 
         if (employee.getRole() != Role.EMPLOYEE) {
             throw new IllegalArgumentException("Selected user is not an employee");
-        }
-
-        if (!employee.isActive()) {
-            throw new IllegalArgumentException("Employee is already archived");
         }
 
         if (
@@ -1443,6 +1516,16 @@ public class ManagerWorkspaceService {
             !manager.getBranch().getId().equals(employee.getBranch().getId())
         ) {
             throw new IllegalArgumentException("Employee does not belong to the manager pharmacy");
+        }
+
+        return employee;
+    }
+
+    private User requireManagedEmployee(User manager, Long employeeId) {
+        User employee = requireBranchEmployee(manager, employeeId);
+
+        if (!employee.isActive()) {
+            throw new IllegalArgumentException("Employee account is inactive. Reactivate the account before editing or scheduling.");
         }
 
         return employee;

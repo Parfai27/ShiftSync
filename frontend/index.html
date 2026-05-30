@@ -5,70 +5,8 @@
     <link rel="icon" type="image/svg+xml" href="" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>shift-system</title>
-    <style>
-      df-messenger {
-        --df-messenger-font-color: #0f172a;
-        --df-messenger-font-family: "Manrope", "Segoe UI", sans-serif;
-        --df-messenger-chat-background-color: #f8fafc;
-        --df-messenger-message-bot-background: #e2e8f0;
-        --df-messenger-message-user-background: #0f51ff;
-        --df-messenger-user-message: #0f51ff;
-        --df-messenger-bot-message: #e2e8f0;
-        --df-messenger-send-icon: #0f51ff;
-        --df-messenger-button-titlebar-color: #0f51ff;
-        --df-messenger-button-titlebar-font-color: #ffffff;
-        --df-messenger-input-box-color: #ffffff;
-        --df-messenger-input-font-color: #0f172a;
-        --df-messenger-input-placeholder-font-color: #64748b;
-        --df-messenger-input-box-border: 0px solid transparent;
-        --df-messenger-chat-border: 0px solid transparent;
-        --df-messenger-minimized-chat-close-icon-color: #ffffff;
-        --df-messenger-chat-border-radius: 18px;
-
-        position: fixed;
-        z-index: 999;
-        right: 18px;
-        bottom: 18px;
-      }
-
-      df-messenger::part(input-box) {
-        border: none;
-        border-top: none;
-        background: #ffffff;
-        padding: 10px 12px;
-      }
-
-      df-messenger::part(input) {
-        border: none;
-        outline: none;
-        border-radius: 0;
-        background: transparent;
-        font-size: 14px;
-        font-weight: 500;
-        line-height: 1.4;
-      }
-
-      df-messenger::part(send-icon) {
-        color: #0f51ff;
-      }
-
-      @media (max-width: 640px) {
-        df-messenger {
-          right: 10px;
-          bottom: 10px;
-        }
-      }
-    </style>
   </head>
   <body>
-    <script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
-<df-messenger
-  intent="WELCOME"
-  chat-title="ShiftSync chatbot assistant"
-  chat-icon="/chat2.png"
-  agent-id="d1b48588-5678-4be0-9aaa-2294c9f31cf9"
-  language-code="en"
-></df-messenger>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
