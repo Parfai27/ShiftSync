@@ -428,16 +428,6 @@ export default function MySchedule() {
 							{error ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div> : null}
 
 							<div className="mt-5 rounded-2xl bg-[#f3f6ff] p-3">
-								<div className="grid grid-cols-7 gap-2 text-center">
-									{schedulePage.weekDays.map((day) => (
-										<div key={`${day.day}-${day.date}`} className="rounded-xl px-1 py-2">
-											<div className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">{day.day}</div>
-											<div className="mt-1 text-lg font-extrabold text-slate-700">{day.date}</div>
-											<div className={`mx-auto mt-1 h-1.5 w-1.5 rounded-full ${day.active ? 'bg-[#0f51ff]' : 'bg-transparent'}`} />
-										</div>
-									))}
-								</div>
-
 								<div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200/80 bg-[#f9fbff]" ref={calendarRef}>
 									<div className="min-w-[920px]">
 										<div className="grid grid-cols-7 border-b border-slate-200/80 bg-[#f4f7ff]">

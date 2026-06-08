@@ -6,6 +6,7 @@ import com.shiftsync.backend.dto.ManagerActionDtos.CompliancePolicyStatusUpdateR
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeCreateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeCreateResponse;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeArchiveRequest;
+import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeDeleteRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeStatusUpdateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeUpdateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.NotificationUpdateRequest;
@@ -18,6 +19,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -105,6 +107,14 @@ public class ManagerWorkspaceController {
         @Valid @RequestBody EmployeeArchiveRequest request
     ) {
         managerWorkspaceService.archiveEmployee(employeeId, request);
+    }
+
+    @DeleteMapping("/employees/{employeeId}")
+    public void deleteEmployee(
+        @PathVariable Long employeeId,
+        @Valid @RequestBody EmployeeDeleteRequest request
+    ) {
+        managerWorkspaceService.deleteEmployee(employeeId, request);
     }
 
     @PatchMapping("/employees/{employeeId}/status")

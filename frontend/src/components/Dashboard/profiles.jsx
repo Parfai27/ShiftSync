@@ -27,10 +27,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import ExportPickerModal from '../shared/ExportPickerModal.jsx'
 import {
 	createManagedEmployee,
+	deleteManagedEmployee,
 	fetchManagedEmployeeDetail,
 	resolveProfileImage,
 	updateManagedEmployee,
-	updateManagedEmployeeStatus,
 	useManagerWorkspace,
 } from '../../lib/managerWorkspace'
 import { executeProfileExport, PROFILE_EXPORT_OPTIONS } from '../../lib/profileExports'
@@ -75,9 +75,8 @@ export default function Profiles() {
 	const [isDetailLoading, setIsDetailLoading] = useState(false)
 	const [isSaving, setIsSaving] = useState(false)
 	const [isArchiving, setIsArchiving] = useState(false)
-	const [isReactivating, setIsReactivating] = useState(false)
-	const [rosterFilter, setRosterFilter] = useState('active')
-	const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false)
+	const [rosterFilter, setRosterFilter] = useState('all')
+	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 	const [showExportModal, setShowExportModal] = useState(false)
 	const [exportType, setExportType] = useState('roster')
 	const [exportFormat, setExportFormat] = useState('html')
@@ -126,6 +125,22 @@ export default function Profiles() {
 			setCurrentPage(totalPages)
 		}
 	}, [currentPage, totalPages])
+
+	useEffect(() => {
+		if (!selectedEmployeeId || !filteredRoster.length) {
+			return
+		}
+
+		const selectedIndex = filteredRoster.findIndex((employee) => employee.userId === selectedEmployeeId)
+		if (selectedIndex < 0) {
+			return
+		}
+
+		const targetPage = Math.floor(selectedIndex / PAGE_SIZE) + 1
+		if (targetPage !== currentPage) {
+			setCurrentPage(targetPage)
+		}
+	}, [currentPage, filteredRoster, selectedEmployeeId])
 
 	useEffect(() => {
 		if (!roster.length) {
@@ -279,7 +294,7 @@ export default function Profiles() {
 		}
 	}
 
-	async function handleDeactivateEmployee() {
+	async function handleDeleteEmployee() {
 		if (!featured?.userId || !session?.userId) {
 			return
 		}
@@ -288,39 +303,18 @@ export default function Profiles() {
 			setIsArchiving(true)
 			setActionError('')
 			setActionMessage('')
-			await updateManagedEmployeeStatus(featured.userId, { managerId: session.userId, active: false })
+			await deleteManagedEmployee(featured.userId, { managerId: session.userId })
 			await reloadWorkspace()
 			setSelectedEmployeeId(null)
 			setFeatured(null)
 			setForm(emptyForm)
 			setIsEditing(false)
-			setShowDeactivateConfirm(false)
-			setActionMessage('Employee account deactivated. They can no longer sign in and future shifts were released.')
+			setShowDeleteConfirm(false)
+			setActionMessage('Employee account deleted from the database. Their shifts and related records were removed too.')
 		} catch (archiveError) {
-			setActionError(archiveError.message || 'Unable to deactivate this employee.')
+			setActionError(archiveError.message || 'Unable to delete this employee.')
 		} finally {
 			setIsArchiving(false)
-		}
-	}
-
-	async function handleReactivateEmployee() {
-		if (!featured?.userId || !session?.userId) {
-			return
-		}
-
-		try {
-			setIsReactivating(true)
-			setActionError('')
-			setActionMessage('')
-			await updateManagedEmployeeStatus(featured.userId, { managerId: session.userId, active: true })
-			const refreshedDetail = await fetchManagedEmployeeDetail(session.userId, featured.userId)
-			setFeatured(refreshedDetail)
-			await reloadWorkspace()
-			setActionMessage(`${refreshedDetail.name} was reactivated and can sign in again.`)
-		} catch (reactivateError) {
-			setActionError(reactivateError.message || 'Unable to reactivate this employee.')
-		} finally {
-			setIsReactivating(false)
 		}
 	}
 
@@ -341,10 +335,10 @@ export default function Profiles() {
 			setActionError('')
 			setActionMessage('')
 			setCreateResult(null)
-			const createdEmployee = await createManagedEmployee({
-				managerId: session.userId,
-				fullName: createForm.fullName.trim(),
-				email: createForm.email.trim(),
+		const createdEmployee = await createManagedEmployee({
+			managerId: session.userId,
+			fullName: createForm.fullName.trim(),
+			email: createForm.email.trim(),
 				jobTitle: createForm.jobTitle.trim(),
 				phoneNumber: createForm.phoneNumber.trim(),
 			})
@@ -428,7 +422,7 @@ export default function Profiles() {
 		}
 	}
 
-	const detailBusy = isDetailLoading || isSaving || isArchiving || isReactivating
+	const detailBusy = isDetailLoading || isSaving || isArchiving
 	const isInactiveEmployee = featured?.active === false
 
 	return (
@@ -538,11 +532,11 @@ export default function Profiles() {
 									</button>
 									<button
 										className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-										disabled={!featured || isInactiveEmployee || detailBusy}
-										onClick={() => setShowDeactivateConfirm(true)}
+										disabled={!featured || detailBusy}
+										onClick={() => setShowDeleteConfirm(true)}
 										type="button"
 									>
-										Deactivate
+										Delete
 									</button>
 								</div>
 							</div>
@@ -564,24 +558,24 @@ export default function Profiles() {
 								))}
 							</div>
 
-							{showDeactivateConfirm ? (
+							{showDeleteConfirm ? (
 								<div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-900">
-									<div className="font-bold">Deactivate {featured?.name}?</div>
+									<div className="font-bold">Delete {featured?.name}?</div>
 									<p className="mt-2 text-rose-800">
-										This removes the employee from scheduling, blocks sign-in, and keeps their history for audit purposes. Accounts are not permanently deleted.
+										This permanently removes the employee from the database, clears their schedule history, and deletes their related records.
 									</p>
 									<div className="mt-4 flex flex-wrap gap-3">
 										<button
 											className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
 											disabled={isArchiving}
-											onClick={handleDeactivateEmployee}
+											onClick={handleDeleteEmployee}
 											type="button"
 										>
-											{isArchiving ? 'Deactivating...' : 'Confirm deactivate'}
+											{isArchiving ? 'Deleting...' : 'Confirm delete'}
 										</button>
 										<button
 											className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-700"
-											onClick={() => setShowDeactivateConfirm(false)}
+											onClick={() => setShowDeleteConfirm(false)}
 											type="button"
 										>
 											Cancel
@@ -839,25 +833,14 @@ export default function Profiles() {
 											</div>
 
 											<div className="mt-5 flex items-center gap-3">
-												{isInactiveEmployee ? (
-													<button
-														className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-														disabled={detailBusy}
-														onClick={handleReactivateEmployee}
-														type="button"
-													>
-														{isReactivating ? 'Reactivating...' : 'Reactivate account'}
-													</button>
-												) : (
-													<button
-														className="flex-1 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-														disabled={detailBusy}
-														onClick={() => setShowDeactivateConfirm(true)}
-														type="button"
-													>
-														{isArchiving ? 'Deactivating...' : 'Deactivate account'}
-													</button>
-												)}
+												<button
+													className="flex-1 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+													disabled={detailBusy}
+													onClick={() => setShowDeleteConfirm(true)}
+													type="button"
+												>
+													{isArchiving ? 'Deleting...' : 'Delete account'}
+												</button>
 												<button
 													className="flex-1 rounded-xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
 													disabled={!isEditing || detailBusy || isInactiveEmployee}

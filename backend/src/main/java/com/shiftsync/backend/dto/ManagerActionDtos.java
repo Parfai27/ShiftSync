@@ -46,6 +46,12 @@ public final class ManagerActionDtos {
     ) {
     }
 
+    public record EmployeeDeleteRequest(
+        @NotNull(message = "Manager session is required.")
+        Long managerId
+    ) {
+    }
+
     public record EmployeeStatusUpdateRequest(
         @NotNull(message = "Manager session is required.")
         Long managerId,

@@ -9,4 +9,5 @@ public interface ShiftAdjustmentRequestRepository extends JpaRepository<ShiftAdj
     List<ShiftAdjustmentRequest> findByStatus(AdjustmentStatus status);
     List<ShiftAdjustmentRequest> findByEmployeeId(Long employeeId);
     List<ShiftAdjustmentRequest> findByTargetEmployeeId(Long targetEmployeeId);
+    void deleteByEmployeeIdOrTargetEmployeeId(Long employeeId, Long targetEmployeeId);
 }

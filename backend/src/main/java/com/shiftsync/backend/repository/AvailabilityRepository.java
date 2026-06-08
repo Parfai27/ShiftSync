@@ -8,4 +8,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface AvailabilityRepository extends JpaRepository<Availability, Long> {
     List<Availability> findByEmployeeId(Long employeeId);
     List<Availability> findByAvailableDate(LocalDate availableDate);
+    void deleteByEmployeeId(Long employeeId);
 }

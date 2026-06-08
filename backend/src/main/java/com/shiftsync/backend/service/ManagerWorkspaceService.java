@@ -42,6 +42,7 @@ import com.shiftsync.backend.dto.ManagerActionDtos.CompliancePolicyStatusUpdateR
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeCreateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeCreateResponse;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeArchiveRequest;
+import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeDeleteRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeStatusUpdateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.EmployeeUpdateRequest;
 import com.shiftsync.backend.dto.ManagerActionDtos.NotificationUpdateRequest;
@@ -64,8 +65,10 @@ import com.shiftsync.backend.model.User;
 import com.shiftsync.backend.repository.AuditLogRepository;
 import com.shiftsync.backend.repository.BranchRepository;
 import com.shiftsync.backend.repository.CompliancePolicyRepository;
+import com.shiftsync.backend.repository.AvailabilityRepository;
 import com.shiftsync.backend.repository.EmployeeProfileRepository;
 import com.shiftsync.backend.repository.NotificationRepository;
+import com.shiftsync.backend.repository.PayrollRecordRepository;
 import com.shiftsync.backend.repository.ShiftAdjustmentRequestRepository;
 import com.shiftsync.backend.repository.ShiftAssignmentRepository;
 import com.shiftsync.backend.repository.ShiftRepository;
@@ -134,10 +137,12 @@ public class ManagerWorkspaceService {
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
     private final EmployeeProfileRepository employeeProfileRepository;
+    private final AvailabilityRepository availabilityRepository;
     private final ShiftRepository shiftRepository;
     private final ShiftAssignmentRepository shiftAssignmentRepository;
     private final ShiftAdjustmentRequestRepository adjustmentRepository;
     private final NotificationRepository notificationRepository;
+    private final PayrollRecordRepository payrollRecordRepository;
     private final CompliancePolicyRepository compliancePolicyRepository;
     private final AuditLogRepository auditLogRepository;
     private final PasswordEncoder passwordEncoder;
@@ -504,7 +509,43 @@ public class ManagerWorkspaceService {
 
     @Transactional
     public void archiveEmployee(Long employeeId, EmployeeArchiveRequest request) {
-        updateEmployeeStatus(employeeId, new EmployeeStatusUpdateRequest(request.managerId(), false));
+        deleteEmployee(employeeId, new EmployeeDeleteRequest(request.managerId()));
+    }
+
+    @Transactional
+    public void deleteEmployee(Long employeeId, EmployeeDeleteRequest request) {
+        User manager = requireManager(request.managerId());
+        User employee = requireBranchEmployee(manager, employeeId);
+
+        List<ShiftAssignment> assignments = shiftAssignmentRepository.findByEmployeeId(employee.getId());
+        for (ShiftAssignment assignment : assignments) {
+            Shift shift = assignment.getShift();
+            shift.setAssignedStaff(Math.max(0, shift.getAssignedStaff() - 1));
+            updateShiftStaffingStatus(shift);
+            shiftRepository.save(shift);
+        }
+
+        if (!assignments.isEmpty()) {
+            shiftAssignmentRepository.deleteAll(assignments);
+        }
+
+        adjustmentRepository.deleteByEmployeeIdOrTargetEmployeeId(employee.getId(), employee.getId());
+        availabilityRepository.deleteByEmployeeId(employee.getId());
+        payrollRecordRepository.deleteByEmployeeId(employee.getId());
+        notificationRepository.deleteByRecipientId(employee.getId());
+        auditLogRepository.deleteByActorId(employee.getId());
+        employeeProfileRepository.deleteByUserId(employee.getId());
+        userRepository.delete(employee);
+
+        auditLogRepository.save(
+            AuditLog.builder()
+                .actor(manager)
+                .action("Deleted employee account")
+                .targetModule("Profiles")
+                .actionTime(java.time.LocalDateTime.now())
+                .details("Deleted " + employee.getFullName() + " (" + employee.getEmail() + ") from the pharmacy database")
+                .build()
+        );
     }
 
     @Transactional

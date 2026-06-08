@@ -477,7 +477,28 @@ public class SchedulingService {
                 .build()
         );
 
+        sendShiftAssignmentEmail(employee, shift);
         logAudit(manager, action, "Scheduling", employee.getFullName() + " assigned to " + shift.getName() + " on " + shift.getShiftDate() + ".");
+    }
+
+    private void sendShiftAssignmentEmail(User employee, Shift shift) {
+        if (employee == null || employee.getEmail() == null || employee.getEmail().isBlank()) {
+            return;
+        }
+
+        credentialEmailService.sendShiftChangeNotice(
+            employee.getEmail(),
+            employee.getFullName(),
+            "New shift assignment - " + shift.getName(),
+            "You have been assigned a new shift. Please review the details below.",
+            List.of(
+                ShiftAssignment.builder()
+                    .employee(employee)
+                    .shift(shift)
+                    .assignedAt(LocalDateTime.now())
+                    .build()
+            )
+        );
     }
 
     private void validateAssignableShift(User employee, Shift shift) {

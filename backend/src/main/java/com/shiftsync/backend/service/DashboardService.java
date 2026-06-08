@@ -47,8 +47,8 @@ public class DashboardService {
         List<User> branchEmployees = userRepository.findByRole(Role.EMPLOYEE).stream()
             .filter(user -> user.getBranch() != null && manager.getBranch() != null)
             .filter(user -> user.getBranch().getId().equals(manager.getBranch().getId()))
-            .filter(User::isActive)
             .toList();
+        long activeEmployees = branchEmployees.stream().filter(User::isActive).count();
 
         List<Shift> branchShifts = shiftRepository.findByBranchId(manager.getBranch().getId()).stream()
             .filter(shift -> !shift.getShiftDate().isBefore(today))
@@ -75,7 +75,7 @@ public class DashboardService {
             .count();
 
         List<MetricCard> metrics = List.of(
-            new MetricCard("Total Employees", String.valueOf(branchEmployees.size()), branchEmployees.isEmpty() ? "No staff" : "Active", branchEmployees.size() + " active team members in the pharmacy"),
+            new MetricCard("Total Employees", String.valueOf(branchEmployees.size()), branchEmployees.isEmpty() ? "No staff" : "Loaded", activeEmployees + " active of " + branchEmployees.size() + " registered team members"),
             new MetricCard("Scheduled Shifts", String.valueOf(branchShifts.size()), branchShifts.isEmpty() ? "No shifts" : "This Window", fullShifts + " covered • " + partialShifts + " partial • " + openShifts + " open"),
             new MetricCard("Staffing Coverage", coverage + "%", coverage >= 90 ? "Healthy" : "Watch", assignedStaff + " of " + requiredStaff + " required role slots filled"),
             new MetricCard("Pending Adjustments", String.valueOf(pendingAdjustments), pendingAdjustments > 0 ? "Review" : "Clear", pendingAdjustments + " requests waiting for manager action")

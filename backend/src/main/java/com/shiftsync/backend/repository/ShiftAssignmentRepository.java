@@ -8,4 +8,5 @@ public interface ShiftAssignmentRepository extends JpaRepository<ShiftAssignment
     List<ShiftAssignment> findByEmployeeId(Long employeeId);
     List<ShiftAssignment> findByShiftId(Long shiftId);
     java.util.Optional<ShiftAssignment> findByEmployeeIdAndShiftId(Long employeeId, Long shiftId);
+    void deleteByEmployeeId(Long employeeId);
 }

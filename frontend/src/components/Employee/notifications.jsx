@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
 	FiAlertCircle,
 	FiBell,
@@ -85,6 +85,26 @@ function resolveNotificationStyle(kind, unread) {
 	}
 }
 
+function resolveNotificationLabel(kind) {
+	if (kind === 'schedule') {
+		return 'Schedule'
+	}
+	if (kind === 'pay') {
+		return 'Payroll'
+	}
+	return 'System'
+}
+
+function resolveNotificationContext(notification) {
+	if (notification.kind === 'schedule') {
+		return 'Shift roster update'
+	}
+	if (notification.kind === 'pay') {
+		return 'Payroll and earnings notice'
+	}
+	return 'System-wide update'
+}
+
 function resolveNotificationPath(notification) {
 	const text = [notification.title, notification.detail, notification.kind].join(' ').toLowerCase()
 	if (text.includes('pay') || text.includes('payroll') || text.includes('earn')) {
@@ -151,19 +171,7 @@ export default function EmployeeNotifications() {
 		}
 	}, [session?.userId])
 
-	useEffect(() => {
-		if (!session?.userId) {
-			return undefined
-		}
-
-		const intervalId = window.setInterval(() => {
-			void reloadNotifications()
-		}, 3000)
-
-		return () => window.clearInterval(intervalId)
-	}, [session?.userId])
-
-	async function reloadNotifications() {
+	const reloadNotifications = useCallback(async () => {
 		if (!session?.userId) {
 			setError('No employee session found. Please log in again.')
 			return
@@ -175,7 +183,19 @@ export default function EmployeeNotifications() {
 		} catch (loadError) {
 			setError(loadError.message || 'Unable to refresh notifications.')
 		}
-	}
+	}, [session?.userId])
+
+	useEffect(() => {
+		if (!session?.userId) {
+			return undefined
+		}
+
+		const intervalId = window.setInterval(() => {
+			void reloadNotifications()
+		}, 3000)
+
+		return () => window.clearInterval(intervalId)
+	}, [session?.userId, reloadNotifications])
 
 	async function updateNotification(notificationId, read) {
 		if (!session?.userId) {
@@ -279,8 +299,10 @@ export default function EmployeeNotifications() {
 						<section>
 							<div className="flex flex-wrap items-start justify-between gap-3">
 								<div>
-									<h1 className="text-5xl font-black tracking-[-0.05em] text-slate-900">Notifications</h1>
-									<p className="mt-2 text-xl text-slate-500">Stay updated with your latest schedule changes, payroll notices, and pharmacy system updates.</p>
+									<h1 className="text-4xl font-black tracking-[-0.05em] text-slate-900 sm:text-5xl">Notifications</h1>
+									<p className="mt-2 max-w-3xl text-base leading-7 text-slate-500 sm:text-lg">
+										Stay updated with your latest schedule changes, payroll notices, and pharmacy system updates.
+									</p>
 								</div>
 								<button className="rounded-xl bg-[#dfe8ff] px-5 py-3 text-sm font-bold text-[#1f56ea]" onClick={markAllAsRead} type="button"><FiCheck className="mr-1 inline h-4 w-4" /> Mark all as read</button>
 							</div>
@@ -295,34 +317,107 @@ export default function EmployeeNotifications() {
 								<button className={`rounded-xl px-5 py-2 ${filterMode === 'SYSTEM' ? 'bg-white text-[#1f56ea]' : ''}`} onClick={() => setFilterMode('SYSTEM')} type="button">System</button>
 							</div>
 
+							<div className="mt-5 grid gap-3 sm:grid-cols-3">
+								<div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
+									<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Unread</div>
+									<div className="mt-2 flex items-end gap-2">
+										<div className="text-4xl font-black tracking-[-0.05em] text-slate-950">{page.unreadCount}</div>
+										<div className="pb-1 text-sm font-semibold text-slate-500">waiting</div>
+									</div>
+									<p className="mt-2 text-sm leading-6 text-slate-500">Items needing your attention right now.</p>
+								</div>
+								<div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
+									<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Schedule</div>
+									<div className="mt-2 flex items-end gap-2">
+										<div className="text-4xl font-black tracking-[-0.05em] text-slate-950">{page.scheduleCount}</div>
+										<div className="pb-1 text-sm font-semibold text-slate-500">updates</div>
+									</div>
+									<p className="mt-2 text-sm leading-6 text-slate-500">Roster and shift changes from the manager side.</p>
+								</div>
+								<div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
+									<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">System</div>
+									<div className="mt-2 flex items-end gap-2">
+										<div className="text-4xl font-black tracking-[-0.05em] text-slate-950">{page.systemCount}</div>
+										<div className="pb-1 text-sm font-semibold text-slate-500">notices</div>
+									</div>
+									<p className="mt-2 text-sm leading-6 text-slate-500">Platform reminders, policy updates, and alerts.</p>
+								</div>
+							</div>
+
 							<div className="mt-5 space-y-3">
 								{visibleNotifications.length ? visibleNotifications.map((item) => {
 									const style = resolveNotificationStyle(item.kind, item.unread)
 									const Icon = style.icon
+									const kindLabel = resolveNotificationLabel(item.kind)
+									const contextLabel = resolveNotificationContext(item)
 
 									return (
-										<article key={item.id} className={`rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-5 ${style.tone} border-l-4`}>
-											<div className="flex flex-wrap items-start gap-3 sm:gap-4">
-												<button
-													className={`inline-flex h-12 w-12 items-center justify-center rounded-full ${style.iconTone}`}
-													onClick={() => openNotificationDetails(item)}
-													type="button"
-												>
-													<Icon className="h-5 w-5" />
-												</button>
-												<div className="min-w-0 flex-1">
-													<div className="flex flex-wrap items-start justify-between gap-2">
-														<button className="text-left" onClick={() => openNotificationRoute(item)} type="button">
-															<h2 className="text-[28px] font-black tracking-[-0.04em] text-slate-900">{item.title}</h2>
+										<article key={item.id} className={`relative overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_16px_36px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_48px_rgba(15,23,42,0.08)] ${style.tone} border-l-4`}>
+											<div className={`absolute left-0 top-0 h-full w-1.5 ${item.unread ? 'bg-[#1f56ea]' : 'bg-slate-200'}`} />
+											<div className="px-5 py-5 sm:px-6">
+												<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+													<div className="flex items-start gap-4">
+														<button
+															className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/80 ${style.iconTone} shadow-sm`}
+															onClick={() => openNotificationDetails(item)}
+															type="button"
+														>
+															<Icon className="h-5 w-5" />
 														</button>
-														<span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500"><FiClock className="h-3.5 w-3.5" /> {item.when}</span>
+
+														<div className="min-w-0">
+															<div className="flex flex-wrap items-center gap-2">
+																<span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] ${item.unread ? 'bg-[#eef3ff] text-[#1f56ea]' : 'bg-slate-100 text-slate-500'}`}>
+																	{kindLabel}
+																</span>
+																<span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] ${item.unread ? 'bg-[#fff1f1] text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+																	{item.unread ? 'Unread' : 'Read'}
+																</span>
+																<span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-500">
+																	{contextLabel}
+																</span>
+															</div>
+															<button className="mt-3 block text-left" onClick={() => openNotificationRoute(item)} type="button">
+																<h2 className="text-[19px] font-black tracking-[-0.04em] text-slate-950 sm:text-[21px]">
+																	{item.title}
+																</h2>
+															</button>
+															<button
+																className="mt-2 block max-w-4xl text-left text-sm leading-6 text-slate-600 sm:text-[15px]"
+																onClick={() => openNotificationRoute(item)}
+																style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3, overflow: 'hidden' }}
+																type="button"
+															>
+																{item.detail}
+															</button>
+														</div>
 													</div>
-													<button className="mt-1 max-w-5xl text-left text-lg leading-8 text-slate-600" onClick={() => openNotificationRoute(item)} type="button">{item.detail}</button>
-													<div className="mt-3 flex items-center gap-2">
-														<button className="rounded-xl bg-[#e9eeff] px-4 py-2 text-sm font-bold text-[#1f56ea]" onClick={() => {
-															openNotificationDetails(item)
-														}} type="button">View Details</button>
-														<button className="rounded-xl px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100" onClick={() => updateNotification(item.id, !item.unread)} type="button">{item.unread ? 'Mark as Read' : 'Mark as Unread'}</button>
+
+													<div className="flex shrink-0 items-center gap-2 rounded-full bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+														<FiClock className="h-3.5 w-3.5" />
+														{item.when}
+													</div>
+												</div>
+
+												<div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+													<div className="flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+														<span>{item.kind === 'schedule' ? 'Related to your rota' : item.kind === 'pay' ? 'Payroll update' : 'System update'}</span>
+													</div>
+													<div className="flex flex-wrap items-center gap-2">
+														<button
+															className="rounded-full bg-[#eef3ff] px-4 py-2 text-sm font-bold text-[#1f56ea] transition hover:bg-[#e1e9ff]"
+															onClick={() => openNotificationDetails(item)}
+															type="button"
+														>
+															View details
+														</button>
+														<button
+															className="rounded-full px-4 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-100"
+															onClick={() => updateNotification(item.id, !item.unread)}
+															type="button"
+														>
+															{item.unread ? 'Mark as read' : 'Mark as unread'}
+														</button>
 													</div>
 												</div>
 											</div>
@@ -335,30 +430,42 @@ export default function EmployeeNotifications() {
 						</section>
 
 						<section className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,0.8fr)]">
-							<article className="relative overflow-hidden rounded-3xl bg-[#0f51ff] p-6 text-white">
-								<h3 className="text-[38px] font-black tracking-[-0.04em]">Notification Summary</h3>
-								<div className="mt-4 grid grid-cols-3 gap-3">
+							<article className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-[#0f51ff] p-6 text-white shadow-[0_16px_34px_rgba(15,23,42,0.07)]">
+								<div className="flex items-start justify-between gap-4">
 									<div>
-										<div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-blue-100">Unread</div>
-										<div className="mt-1 text-5xl font-black tracking-[-0.04em]">{page.unreadCount}</div>
+										<div className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-blue-100/90">Notification summary</div>
+										<h3 className="mt-2 text-3xl font-black tracking-[-0.04em] sm:text-[34px]">Live inbox snapshot</h3>
+										<p className="mt-2 max-w-xl text-sm leading-7 text-blue-100/85">A quick view of what is waiting for you, what changed in your rota, and which system notices still need attention.</p>
 									</div>
-									<div>
-										<div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-blue-100">Schedule</div>
-										<div className="mt-1 text-5xl font-black tracking-[-0.04em]">{page.scheduleCount}</div>
+									<div className="rounded-2xl bg-white/12 px-4 py-3 text-right">
+										<div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-blue-100/80">Total</div>
+										<div className="mt-1 text-3xl font-black tracking-[-0.04em]">{page.totalCount}</div>
 									</div>
-									<div>
-										<div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-blue-100">System</div>
-										<div className="mt-1 text-5xl font-black tracking-[-0.04em]">{page.systemCount}</div>
+								</div>
+
+								<div className="mt-5 grid grid-cols-3 gap-3">
+									<div className="rounded-2xl border border-white/12 bg-white/10 px-4 py-4 backdrop-blur-sm">
+										<div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-blue-100/75">Unread</div>
+										<div className="mt-2 text-3xl font-black tracking-[-0.05em]">{page.unreadCount}</div>
+									</div>
+									<div className="rounded-2xl border border-white/12 bg-white/10 px-4 py-4 backdrop-blur-sm">
+										<div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-blue-100/75">Schedule</div>
+										<div className="mt-2 text-3xl font-black tracking-[-0.05em]">{page.scheduleCount}</div>
+									</div>
+									<div className="rounded-2xl border border-white/12 bg-white/10 px-4 py-4 backdrop-blur-sm">
+										<div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-blue-100/75">System</div>
+										<div className="mt-2 text-3xl font-black tracking-[-0.05em]">{page.systemCount}</div>
 									</div>
 								</div>
 								<FiBell className="pointer-events-none absolute -bottom-5 right-3 h-30 w-30 text-blue-300/25" />
 							</article>
 
-							<article className="rounded-3xl border border-slate-200/80 bg-[#e8edff] p-6">
-								<h3 className="text-[36px] font-black tracking-[-0.04em] text-slate-900">Quiet Hours</h3>
-								<p className="mt-2 text-lg leading-8 text-slate-600">Mute notifications during your off-work hours to maintain focus.</p>
-								<div className="mt-5 flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-									<div className="inline-flex items-center gap-2 text-xl font-bold text-slate-700"><FiInfo className="h-4 w-4" /> Enabled</div>
+							<article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
+								<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Focus mode</div>
+								<h3 className="mt-2 text-3xl font-black tracking-[-0.04em] text-slate-900">Quiet Hours</h3>
+								<p className="mt-2 text-sm leading-7 text-slate-600">Mute notifications during your off-work hours to keep your attention on the job and reduce distraction.</p>
+								<div className="mt-5 flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
+									<div className="inline-flex items-center gap-2 text-sm font-bold text-slate-700"><FiInfo className="h-4 w-4" /> Quiet hours {quietHoursEnabled ? 'enabled' : 'paused'}</div>
 									<button onClick={() => setQuietHoursEnabled((current) => !current)} type="button"><Toggle active={quietHoursEnabled} /></button>
 								</div>
 							</article>

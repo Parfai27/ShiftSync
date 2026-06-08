@@ -199,6 +199,7 @@ export default function PersonalSettings() {
 				...session,
 				mustChangePassword: false,
 			})
+			setError('')
 			setSuccess('Password changed successfully.')
 			setCurrentPassword('')
 			setNewPassword('')
@@ -245,6 +246,18 @@ export default function PersonalSettings() {
 	const showNotificationsSection = !normalizedSearch || visibleNotificationRules.length > 0
 	const showPrivacySection = !normalizedSearch || ['hide profile privacy visibility', settings.hideProfile ? 'hidden' : 'visible'].join(' ').toLowerCase().includes(normalizedSearch)
 	const showSecuritySection = !normalizedSearch || 'change password logout everywhere security'.includes(normalizedSearch)
+	const passwordFieldErrors = useMemo(() => {
+		const normalized = error.trim().toLowerCase()
+		const currentPasswordError = normalized.includes('current password is incorrect')
+		const newPasswordError = normalized.includes('new password must be at least 6 characters')
+		const confirmPasswordError = normalized.includes('new password and confirmation do not match')
+		return {
+			currentPassword: currentPasswordError ? error : '',
+			newPassword: newPasswordError ? error : '',
+			confirmPassword: confirmPasswordError ? error : '',
+			general: normalized && !currentPasswordError && !newPasswordError && !confirmPasswordError ? error : '',
+		}
+	}, [error])
 
 	return (
 		<main className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#eef4ff_0%,#f7f9ff_38%,#eef2ff_100%)] text-slate-900">
@@ -380,11 +393,11 @@ export default function PersonalSettings() {
 									</article> : null}
 
 									{showSecuritySection ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-										<button className="flex items-center justify-center gap-2 rounded-xl border border-slate-200/80 bg-[#eef2ff] px-4 py-3 text-sm font-bold text-[#2444ac]" onClick={() => {
-											setError('')
-											setSuccess('')
-											setShowPasswordModal(true)
-										}} type="button"><FiLock className="h-4 w-4" /> Change Password</button>
+									<button className="flex items-center justify-center gap-2 rounded-xl border border-slate-200/80 bg-[#eef2ff] px-4 py-3 text-sm font-bold text-[#2444ac]" onClick={() => {
+										setError('')
+										setSuccess('')
+										setShowPasswordModal(true)
+									}} type="button"><FiLock className="h-4 w-4" /> Change Password</button>
 										<button className="flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-600" onClick={handleLogoutEverywhere} type="button"><FiX className="h-4 w-4" /> Logout Everywhere</button>
 									</div> : null}
 								</div>
@@ -408,13 +421,17 @@ export default function PersonalSettings() {
 							{requiresPasswordChange ? null : <button className="rounded-full bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" onClick={() => setShowPasswordModal(false)} type="button">Close</button>}
 						</div>
 						<div className="mt-5 space-y-4">
+							{passwordFieldErrors.general ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{passwordFieldErrors.general}</div> : null}
 							<label className="block">
 								<div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">Current Password</div>
 								<div className="relative">
 									<input
 										type={showCurrentPassword ? 'text' : 'password'}
 										value={currentPassword}
-										onChange={(event) => setCurrentPassword(event.target.value)}
+										onChange={(event) => {
+											setCurrentPassword(event.target.value)
+											setError('')
+										}}
 										className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 pr-12 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
 									/>
 									<button
@@ -426,6 +443,7 @@ export default function PersonalSettings() {
 										{showCurrentPassword ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
 									</button>
 								</div>
+								{passwordFieldErrors.currentPassword ? <div className="mt-1 text-xs font-semibold text-rose-600">{passwordFieldErrors.currentPassword}</div> : null}
 							</label>
 							<label className="block">
 								<div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">New Password</div>
@@ -433,7 +451,10 @@ export default function PersonalSettings() {
 									<input
 										type={showNewPassword ? 'text' : 'password'}
 										value={newPassword}
-										onChange={(event) => setNewPassword(event.target.value)}
+										onChange={(event) => {
+											setNewPassword(event.target.value)
+											setError('')
+										}}
 										className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 pr-12 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
 									/>
 									<button
@@ -445,6 +466,7 @@ export default function PersonalSettings() {
 										{showNewPassword ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
 									</button>
 								</div>
+								{passwordFieldErrors.newPassword ? <div className="mt-1 text-xs font-semibold text-rose-600">{passwordFieldErrors.newPassword}</div> : null}
 							</label>
 							<label className="block">
 								<div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">Confirm New Password</div>
@@ -452,7 +474,10 @@ export default function PersonalSettings() {
 									<input
 										type={showConfirmPassword ? 'text' : 'password'}
 										value={confirmPassword}
-										onChange={(event) => setConfirmPassword(event.target.value)}
+										onChange={(event) => {
+											setConfirmPassword(event.target.value)
+											setError('')
+										}}
 										className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 pr-12 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
 									/>
 									<button
@@ -464,6 +489,7 @@ export default function PersonalSettings() {
 										{showConfirmPassword ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
 									</button>
 								</div>
+								{passwordFieldErrors.confirmPassword ? <div className="mt-1 text-xs font-semibold text-rose-600">{passwordFieldErrors.confirmPassword}</div> : null}
 							</label>
 						</div>
 						<div className="mt-5 flex flex-wrap justify-end gap-3">
