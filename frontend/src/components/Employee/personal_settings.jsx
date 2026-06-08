@@ -5,6 +5,8 @@ import {
 	FiClock,
 	FiDollarSign,
 	FiGrid,
+	FiEye,
+	FiEyeOff,
 	FiLock,
 	FiLogOut,
 	FiMenu,
@@ -47,6 +49,9 @@ export default function PersonalSettings() {
 	const [newPassword, setNewPassword] = useState('')
 	const [confirmPassword, setConfirmPassword] = useState('')
 	const [isChangingPassword, setIsChangingPassword] = useState(false)
+	const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+	const [showNewPassword, setShowNewPassword] = useState(false)
+	const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 	const [searchTerm, setSearchTerm] = useState('')
 	const [requiresPasswordChange, setRequiresPasswordChange] = useState(Boolean(session?.mustChangePassword || location.state?.firstLogin))
 
@@ -187,6 +192,7 @@ export default function PersonalSettings() {
 					userId: session.userId,
 					currentPassword,
 					newPassword,
+					confirmPassword,
 				}),
 			})
 			saveSession({
@@ -404,15 +410,60 @@ export default function PersonalSettings() {
 						<div className="mt-5 space-y-4">
 							<label className="block">
 								<div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">Current Password</div>
-								<input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white" />
+								<div className="relative">
+									<input
+										type={showCurrentPassword ? 'text' : 'password'}
+										value={currentPassword}
+										onChange={(event) => setCurrentPassword(event.target.value)}
+										className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 pr-12 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
+									/>
+									<button
+										type="button"
+										onClick={() => setShowCurrentPassword((current) => !current)}
+										className="absolute inset-y-0 right-0 flex items-center justify-center px-3 text-slate-500 transition hover:text-[#1051ff]"
+										aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+									>
+										{showCurrentPassword ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+									</button>
+								</div>
 							</label>
 							<label className="block">
 								<div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">New Password</div>
-								<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white" />
+								<div className="relative">
+									<input
+										type={showNewPassword ? 'text' : 'password'}
+										value={newPassword}
+										onChange={(event) => setNewPassword(event.target.value)}
+										className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 pr-12 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
+									/>
+									<button
+										type="button"
+										onClick={() => setShowNewPassword((current) => !current)}
+										className="absolute inset-y-0 right-0 flex items-center justify-center px-3 text-slate-500 transition hover:text-[#1051ff]"
+										aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+									>
+										{showNewPassword ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+									</button>
+								</div>
 							</label>
 							<label className="block">
 								<div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">Confirm New Password</div>
-								<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white" />
+								<div className="relative">
+									<input
+										type={showConfirmPassword ? 'text' : 'password'}
+										value={confirmPassword}
+										onChange={(event) => setConfirmPassword(event.target.value)}
+										className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 pr-12 text-[14px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
+									/>
+									<button
+										type="button"
+										onClick={() => setShowConfirmPassword((current) => !current)}
+										className="absolute inset-y-0 right-0 flex items-center justify-center px-3 text-slate-500 transition hover:text-[#1051ff]"
+										aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+									>
+										{showConfirmPassword ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+									</button>
+								</div>
 							</label>
 						</div>
 						<div className="mt-5 flex flex-wrap justify-end gap-3">

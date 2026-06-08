@@ -28,7 +28,7 @@ const knowledgeBase = [
 		title: 'Weekly shift scheduling',
 		keywords: ['schedule', 'scheduling', 'weekly shifts', 'auto schedule', 'assign shift', 'create weekly shifts', 'calendar'],
 		answer:
-			'Scheduling is built around a weekly rota. The manager can reset the visible week with Create Weekly Shifts, use Auto Schedule to fill roles, and then manually assign, reassign, or remove employees directly from the grid. A valid day should have one Pharmacist and one Pharmacy Assistant / Attendant per shift.',
+			'Scheduling is built around a weekly rota. Ngabo Pharmacy uses two daily shifts: 1st Shift from 07:00 to 15:00 and 2nd Shift from 15:00 to 23:00. The manager can reset the visible week with Create Weekly Shifts, use Auto Schedule to fill roles, and then manually assign, reassign, or remove employees directly from the grid. A valid shift should have one Pharmacist and one Pharmacy Assistant / Attendant.',
 		route: '/scheduling',
 	},
 	{

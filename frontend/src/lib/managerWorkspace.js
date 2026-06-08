@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from './api'
 import { loadSession } from './session'
 
@@ -91,9 +91,10 @@ export function useManagerWorkspace(options = {}) {
 	const [isLoading, setIsLoading] = useState(true)
 	const [error, setError] = useState('')
 	const rangeDays = options.rangeDays ?? 7
+	const pollMs = options.pollMs ?? 3000
 	const workspacePath = session?.userId ? `/api/manager/workspace/${session.userId}?rangeDays=${rangeDays}` : ''
 
-	async function loadWorkspace() {
+	const loadWorkspace = useCallback(async ({ silent = false } = {}) => {
 		if (!session?.userId) {
 			setError('No active manager session was found.')
 			setIsLoading(false)
@@ -102,14 +103,19 @@ export function useManagerWorkspace(options = {}) {
 
 		try {
 			setError('')
+			if (!silent) {
+				setIsLoading(true)
+			}
 			const payload = await apiRequest(workspacePath)
 			setWorkspace(payload)
 		} catch (loadError) {
 			setError(loadError.message || 'Unable to load manager workspace data.')
 		} finally {
-			setIsLoading(false)
+			if (!silent) {
+				setIsLoading(false)
+			}
 		}
-	}
+	}, [session?.userId, workspacePath])
 
 	useEffect(() => {
 		let cancelled = false
@@ -139,11 +145,17 @@ export function useManagerWorkspace(options = {}) {
 		}
 
 		run()
+		const intervalId = pollMs > 0 ? window.setInterval(() => {
+			void run()
+		}, pollMs) : null
 
 		return () => {
 			cancelled = true
+			if (intervalId) {
+				window.clearInterval(intervalId)
+			}
 		}
-	}, [rangeDays, session?.userId, workspacePath])
+	}, [pollMs, rangeDays, session?.userId, workspacePath])
 
 	return {
 		session,

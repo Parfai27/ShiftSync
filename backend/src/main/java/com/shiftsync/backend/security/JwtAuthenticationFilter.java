@@ -23,6 +23,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserRepository userRepository;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return path.startsWith("/api/chat/")
+            || path.equals("/api/chat")
+            || path.startsWith("/api/auth/")
+            || path.equals("/api/health")
+            || path.startsWith("/swagger-ui")
+            || path.startsWith("/v3/api-docs");
+    }
+
+    @Override
     protected void doFilterInternal(
         HttpServletRequest request,
         HttpServletResponse response,

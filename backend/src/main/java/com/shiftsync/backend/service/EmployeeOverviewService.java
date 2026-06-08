@@ -58,16 +58,20 @@ import com.shiftsync.backend.repository.ShiftRepository;
 import com.shiftsync.backend.repository.UserRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.text.NumberFormat;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
@@ -165,9 +169,13 @@ public class EmployeeOverviewService {
         LocalDate monthEnd = month.atEndOfMonth();
         LocalDate calendarStart = monthStart.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY));
         LocalDate calendarEnd = monthEnd.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY));
+        Map<Long, Shift> previewSwapByOriginalShiftId = buildPreviewSwapMap(userId);
+        Set<LocalDate> approvedTimeOffDates = buildApprovedTimeOffDates(userId);
+        List<Shift> visibleShifts = assignments.stream()
+            .map(item -> previewSwapByOriginalShiftId.getOrDefault(item.getShift().getId(), item.getShift()))
+            .toList();
 
-        List<Shift> employeeMonthShifts = assignments.stream()
-            .map(ShiftAssignment::getShift)
+        List<Shift> employeeMonthShifts = visibleShifts.stream()
             .filter(shift -> !shift.getShiftDate().isBefore(monthStart) && !shift.getShiftDate().isAfter(monthEnd))
             .toList();
 
@@ -185,17 +193,27 @@ public class EmployeeOverviewService {
                 .findFirst()
                 .orElse(null);
 
-            boolean hasOpenShift = branchMonthShifts.stream()
+            boolean hasOpenShift = !approvedTimeOffDates.contains(cellDate) && branchMonthShifts.stream()
                 .filter(shift -> shift.getShiftDate().equals(cellDate))
                 .anyMatch(shift -> shift.getAssignedStaff() < shift.getRequiredStaff());
 
-            EmployeeCalendarEvent event = assignedShift == null ? null : new EmployeeCalendarEvent(
-                formatWindow(assignedShift),
-                assignedShift.getName(),
-                (employee.getBranch() != null ? employee.getBranch().getName() : "Pharmacy Shift") + " • " + resolveShiftRole(profile),
-                toneForShift(assignedShift),
-                cellDate.equals(today) ? "TODAY" : null
-            );
+            EmployeeCalendarEvent event = assignedShift != null
+                ? new EmployeeCalendarEvent(
+                    formatWindow(assignedShift),
+                    assignedShift.getName(),
+                    (employee.getBranch() != null ? employee.getBranch().getName() : "Pharmacy Shift") + " • " + resolveShiftRole(profile),
+                    toneForShift(assignedShift),
+                    cellDate.equals(today) ? "TODAY" : null
+                )
+                : approvedTimeOffDates.contains(cellDate)
+                    ? new EmployeeCalendarEvent(
+                        "DAY OFF",
+                        "Time Off",
+                        "Approved absence",
+                        "border-l-rose-500 bg-rose-50 text-rose-700",
+                        "APPROVED"
+                    )
+                    : null;
 
             calendarCells.add(new EmployeeCalendarCell(
                 cellDate.getDayOfMonth(),
@@ -211,8 +229,7 @@ public class EmployeeOverviewService {
         List<EmployeeWeekDay> weekDays = java.util.stream.IntStream.range(0, 7)
             .mapToObj(index -> {
                 LocalDate date = weekStart.plusDays(index);
-                boolean active = assignments.stream()
-                    .map(ShiftAssignment::getShift)
+                boolean active = visibleShifts.stream()
                     .anyMatch(shift -> shift.getShiftDate().equals(date));
                 return new EmployeeWeekDay(
                     date.getDayOfWeek().name().substring(0, 3),
@@ -222,8 +239,7 @@ public class EmployeeOverviewService {
             })
             .toList();
 
-        BigDecimal weeklyHours = BigDecimal.valueOf(assignments.stream()
-            .map(ShiftAssignment::getShift)
+        BigDecimal weeklyHours = BigDecimal.valueOf(visibleShifts.stream()
             .filter(shift -> !shift.getShiftDate().isBefore(weekStart) && !shift.getShiftDate().isAfter(weekStart.plusDays(6)))
             .mapToLong(this::shiftDurationHours)
             .sum());
@@ -249,13 +265,16 @@ public class EmployeeOverviewService {
             .toList();
 
         List<EmployeeAssignedShift> assignedShifts = assignments.stream()
-            .filter(item -> !item.getShift().getShiftDate().isBefore(today))
-            .map(ShiftAssignment::getShift)
-            .map(shift -> new EmployeeAssignedShift(
-                shift.getId(),
-                shift.getName(),
-                shift.getShiftDate().format(DateTimeFormatter.ofPattern("dd MMM uuuu")),
-                formatWindow(shift)
+            .map(item -> Map.entry(item, previewSwapByOriginalShiftId.getOrDefault(item.getShift().getId(), item.getShift())))
+            .filter(entry -> !entry.getValue().getShiftDate().isBefore(today))
+            .map(entry -> new EmployeeAssignedShift(
+                entry.getValue().getId(),
+                entry.getValue().getName(),
+                entry.getValue().getShiftDate().format(DateTimeFormatter.ofPattern("dd MMM uuuu")),
+                formatWindow(entry.getValue()),
+                formatAttendanceTime(entry.getKey().getClockedInAt()),
+                formatAttendanceTime(entry.getKey().getClockedOutAt()),
+                resolveAttendanceState(entry.getKey())
             ))
             .toList();
 
@@ -662,6 +681,62 @@ public class EmployeeOverviewService {
     }
 
     @Transactional
+    public void clockInShift(Long userId, Long shiftId) {
+        requireEmployee(userId);
+        ShiftAssignment assignment = shiftAssignmentRepository.findByEmployeeIdAndShiftId(userId, shiftId)
+            .orElseThrow(() -> new IllegalArgumentException("Selected shift is not assigned to this employee."));
+
+        if (assignment.getClockedInAt() != null) {
+            throw new IllegalArgumentException("You have already clocked into this shift.");
+        }
+        if (assignment.getClockedOutAt() != null) {
+            throw new IllegalArgumentException("This shift has already been completed.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime shiftStart = LocalDateTime.of(assignment.getShift().getShiftDate(), assignment.getShift().getStartTime());
+        if (now.isBefore(shiftStart.minusMinutes(30))) {
+            throw new IllegalArgumentException("You can clock in within 30 minutes of your shift start.");
+        }
+
+        assignment.setClockedInAt(now);
+        shiftAssignmentRepository.save(assignment);
+    }
+
+    @Transactional
+    public void clockOutShift(Long userId, Long shiftId) {
+        requireEmployee(userId);
+        ShiftAssignment assignment = shiftAssignmentRepository.findByEmployeeIdAndShiftId(userId, shiftId)
+            .orElseThrow(() -> new IllegalArgumentException("Selected shift is not assigned to this employee."));
+
+        if (assignment.getClockedOutAt() != null) {
+            throw new IllegalArgumentException("This shift has already been clocked out.");
+        }
+        if (assignment.getClockedInAt() == null) {
+            throw new IllegalArgumentException("You must clock in before clocking out.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        long requiredMinutes = Math.max(4L * 60L, (long) Math.ceil(shiftDurationHours(assignment.getShift()) * 60.0 * 0.75));
+        long elapsedMinutes = Duration.between(assignment.getClockedInAt(), now).toMinutes();
+        if (elapsedMinutes < requiredMinutes) {
+            long remainingMinutes = requiredMinutes - elapsedMinutes;
+            long remainingHours = remainingMinutes / 60;
+            long remainingMinutesPart = remainingMinutes % 60;
+            throw new IllegalArgumentException(
+                "You can clock out after completing at least 75% of the shift. Please wait "
+                    + remainingHours
+                    + "h "
+                    + remainingMinutesPart
+                    + "m more."
+            );
+        }
+
+        assignment.setClockedOutAt(now);
+        shiftAssignmentRepository.save(assignment);
+    }
+
+    @Transactional
     public void requestShiftAdjustment(Long userId, EmployeeAdjustmentCreateRequest request) {
         User employee = requireEmployee(userId);
         if (request == null || request.shiftId() == null) {
@@ -1045,23 +1120,75 @@ public class EmployeeOverviewService {
     }
 
     private EmployeeShiftAdjustmentItem toAdjustmentItem(ShiftAdjustmentRequest request) {
-        String shiftLabel = request.getShift().getName()
+        String shiftDate = request.getShift().getShiftDate().format(DateTimeFormatter.ofPattern("dd MMM uuuu"));
+        String shiftName = request.getShift().getName();
+        String shiftWindow = formatWindow(request.getShift());
+        String shiftLabel = shiftName
             + " • "
-            + request.getShift().getShiftDate().format(DateTimeFormatter.ofPattern("dd MMM uuuu"))
+            + shiftDate
             + " • "
-            + formatWindow(request.getShift());
+            + shiftWindow;
         return new EmployeeShiftAdjustmentItem(
             request.getId(),
             request.getShift().getId(),
+            shiftDate,
+            shiftName,
+            shiftWindow,
             shiftLabel,
             request.getAdjustmentType(),
             request.getRequestedChange(),
             request.getStatus().name(),
             request.getTargetEmployee() != null ? request.getTargetEmployee().getFullName() : null,
-            request.getTargetEmployeeResponse() != null ? request.getTargetEmployeeResponse().name() : "NOT_REQUIRED"
+            request.getTargetEmployeeResponse() != null ? request.getTargetEmployeeResponse().name() : "NOT_REQUIRED",
+            request.getTargetShift() != null ? request.getTargetShift().getId() : null,
+            request.getTargetShift() != null ? request.getTargetShift().getShiftDate().format(DateTimeFormatter.ofPattern("dd MMM uuuu")) : null,
+            request.getTargetShift() != null ? request.getTargetShift().getName() : null,
+            request.getTargetShift() != null ? formatWindow(request.getTargetShift()) : null
         );
     }
 
+    private Map<Long, Shift> buildPreviewSwapMap(Long userId) {
+        Map<Long, Shift> previewMap = new HashMap<>();
+
+        shiftAdjustmentRequestRepository.findByEmployeeId(userId).stream()
+            .filter(item -> "Shift Swap".equalsIgnoreCase(item.getAdjustmentType()))
+            .filter(item -> item.getStatus() == AdjustmentStatus.PENDING)
+            .filter(item -> item.getTargetEmployeeResponse() == SwapResponseStatus.ACCEPTED)
+            .filter(item -> item.getTargetEmployee() != null && item.getTargetShift() != null)
+            .forEach(adjustment -> previewMap.put(adjustment.getShift().getId(), adjustment.getTargetShift()));
+
+        shiftAdjustmentRequestRepository.findByTargetEmployeeId(userId).stream()
+            .filter(item -> "Shift Swap".equalsIgnoreCase(item.getAdjustmentType()))
+            .filter(item -> item.getStatus() == AdjustmentStatus.PENDING)
+            .filter(item -> item.getTargetEmployeeResponse() == SwapResponseStatus.ACCEPTED)
+            .filter(item -> item.getEmployee() != null && item.getTargetShift() != null)
+            .forEach(adjustment -> previewMap.put(adjustment.getTargetShift().getId(), adjustment.getShift()));
+
+        return previewMap;
+    }
+
+    private Set<LocalDate> buildApprovedTimeOffDates(Long userId) {
+        return shiftAdjustmentRequestRepository.findByEmployeeId(userId).stream()
+            .filter(item -> "Time Off Request".equalsIgnoreCase(item.getAdjustmentType()))
+            .filter(item -> item.getStatus() == AdjustmentStatus.APPROVED)
+            .filter(item -> item.getShift() != null)
+            .map(item -> item.getShift().getShiftDate())
+            .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private String formatAttendanceTime(LocalDateTime timestamp) {
+        return timestamp == null ? "Pending" : timestamp.format(DateTimeFormatter.ofPattern("dd MMM HH:mm"));
+    }
+
+    private String resolveAttendanceState(ShiftAssignment assignment) {
+        if (assignment.getClockedOutAt() != null) {
+            return "Completed";
+        }
+        if (assignment.getClockedInAt() != null) {
+            return "Clocked In";
+        }
+        return "Scheduled";
+    }
     private boolean bool(Boolean value) {
         return Boolean.TRUE.equals(value);
     }

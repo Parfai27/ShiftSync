@@ -20,7 +20,7 @@ import {
 } from 'react-icons/fi'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
-import { exportElementAsSvg } from '../../lib/export'
+import { buildBrandedReportDocument, buildDatedFilename, downloadBrandedReport, formatExportDate, requestExportDateRange, resolveShiftSyncLogoDataUrl } from '../../lib/export'
 import { clearSession } from '../../lib/session'
 import { resolveProfileImage, useManagerWorkspace } from '../../lib/managerWorkspace'
 import ManagerProfileMenu from '../shared/ManagerProfileMenu'
@@ -41,6 +41,7 @@ function buildEmployeeDayAssignments(boardDays, employeeName) {
 					window: shift.window,
 					role: role.role,
 					tone: shift.tone,
+					status: role.status,
 				}))
 		)
 	)
@@ -81,7 +82,7 @@ export default function Scheduling() {
 	const [viewMode, setViewMode] = useState('WEEK')
 	const [selectedDayIndex, setSelectedDayIndex] = useState(0)
 	const [searchTerm, setSearchTerm] = useState('')
-	const { manager, workspace, isLoading, error, reloadWorkspace } = useManagerWorkspace({
+	const { manager, workspace, session, isLoading, error, reloadWorkspace } = useManagerWorkspace({
 		rangeDays: viewMode === 'MONTH' ? 30 : 7,
 	})
 	const profileImage = resolveProfileImage(manager?.profileImageUrl, manager?.fullName)
@@ -465,12 +466,84 @@ export default function Scheduling() {
 		}
 
 		try {
+			const dateRange = await requestExportDateRange('Export weekly rota report')
+			if (!dateRange) {
+				return
+			}
+			const logoUrl = await resolveShiftSyncLogoDataUrl()
 			setActionError('')
 			setActionMessage('')
-			exportElementAsSvg(scheduleGridRef.current, `weekly-rota-${viewMode.toLowerCase()}.svg`)
-			setActionMessage('The visible schedule grid was exported as an image.')
+			const reportRows = employeeScheduleRows.map((employee) => ([
+				employee.name,
+				employee.role,
+				employee.hours,
+				...employee.dailyAssignments.map((entries) => (entries.length ? entries.map((entry) => `${entry.shiftName} (${entry.window})`).join(' | ') : 'Off')),
+			]))
+			const openShiftRows = openShiftAssignments.flatMap((dayItems, dayIndex) =>
+				dayItems.map((item) => [
+					visibleBoardDays[dayIndex]?.fullDate || visibleBoardDays[dayIndex]?.day || 'Unknown day',
+					item.shiftName,
+					item.role,
+					item.window,
+					'Open',
+				])
+			)
+			await downloadBrandedReport(
+				buildDatedFilename(`weekly-rota-${viewMode.toLowerCase()}`, dateRange, 'pdf'),
+				buildBrandedReportDocument({
+				logoUrl,
+				brandName: manager?.branchName || 'ShiftSync',
+				brandSubtitle: 'ShiftSync scheduling center',
+				reportTitle: 'Weekly Rota Board',
+				reportSubtitle: 'Manager schedule snapshot with open roles and employee coverage.',
+				generatedAt: new Date().toISOString(),
+				periodLabel: `${formatExportDate(dateRange.from)} to ${formatExportDate(dateRange.to)}${normalizedSearch ? ` � filtered by ${searchTerm.trim()}` : ''}`,
+				preparedBy: manager?.fullName || 'ShiftSync',
+				preparedByEmail: session?.email || manager?.email || 'noreply@shiftsync.local',
+				summaryCards: [
+					{ label: 'Visible Days', value: `${visibleBoardDays.length}`, detail: 'In the current rota view', highlighted: true },
+					{ label: 'Employees Shown', value: `${employeeScheduleRows.length}`, detail: 'Rows included in export' },
+					{ label: 'Open Roles', value: `${openShiftAssignments.flat().length}`, detail: 'Unfilled shift slots' },
+				],
+				metadataRows: [
+					['Workspace', manager?.branchName || 'Ngabo Pharmacy'],
+					['View', viewMode],
+					['Search', searchTerm.trim() || 'None'],
+					['Days Covered', `${visibleBoardDays.length}`],
+				],
+				sections: [
+					{
+						title: 'Open Shifts',
+						description: 'Unfilled roles across the visible rota window.',
+						columns: [
+							{ label: 'Day', nowrap: true },
+							{ label: 'Shift', nowrap: true },
+							{ label: 'Role' },
+							{ label: 'Time', nowrap: true },
+							{ label: 'Status', nowrap: true },
+						],
+						rows: openShiftRows,
+					},
+					{
+						title: 'Employee Coverage',
+						description: 'Assigned shifts by employee across the selected view.',
+						columns: [
+							{ label: 'Employee' },
+							{ label: 'Role' },
+							{ label: 'Hours', nowrap: true },
+							...visibleBoardDays.map((day) => ({ label: `${day.day} ${day.fullDate}`, nowrap: true })),
+						],
+						rows: reportRows,
+					},
+				],
+				footerLeft: `${employeeScheduleRows.length} employee row(s)`,
+				footerRight: `${openShiftAssignments.flat().length} open role(s)`,
+				footerNote: 'This printable export reflects the current live schedule board.',
+			})
+			)
+			setActionMessage('The visible schedule grid was exported as a branded report.')
 		} catch (exportError) {
-			setActionError(exportError.message || 'Unable to export this schedule view as an image.')
+			setActionError(exportError.message || 'Unable to export this schedule view as a report.')
 		}
 	}
 
@@ -813,6 +886,11 @@ export default function Scheduling() {
 																				<div className="text-sm font-black">{entry.window}</div>
 																				<div className="mt-1 text-xs font-semibold">{entry.role}</div>
 																				<div className="mt-1 text-[11px] font-medium opacity-80">{entry.shiftName}</div>
+																				{entry.status && entry.status !== 'ASSIGNED' ? (
+																					<div className="mt-2 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-amber-700">
+																						Pending manager approval
+																					</div>
+																				) : null}
 																			</button>
 																		)) : (
 																			<button
@@ -851,7 +929,7 @@ export default function Scheduling() {
 											<div className="font-medium text-slate-500">Review open roles by day, then assign staff, drag open roles onto employees, or drag assigned shifts to another employee on the same day.</div>
 											<div className="flex items-center gap-3">
 												<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handlePrint} title="Print schedule" type="button"><FiPrinter className="h-4 w-4" /></button>
-												<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handleExportSchedule} title="Download schedule" type="button"><FiDownload className="h-4 w-4" /></button>
+												<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handleExportSchedule} title="Export report" type="button"><FiDownload className="h-4 w-4" /></button>
 											</div>
 										</div>
 									</article>
@@ -902,7 +980,7 @@ export default function Scheduling() {
 						<div className="flex items-start justify-between gap-4">
 							<div>
 								<h2 className="text-2xl font-black tracking-[-0.05em] text-slate-950">Assign Shift</h2>
-								<div className="mt-2 text-sm text-slate-500">Select an employee, choose the day, then pick one of the three daily shifts.</div>
+								<div className="mt-2 text-sm text-slate-500">Select an employee, choose the day, then pick one of the two daily shifts.</div>
 							</div>
 							<button className="rounded-full bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" onClick={() => setIsAssignModalOpen(false)} type="button">Close</button>
 						</div>
@@ -1043,3 +1121,4 @@ export default function Scheduling() {
 		</main>
 	)
 }
+

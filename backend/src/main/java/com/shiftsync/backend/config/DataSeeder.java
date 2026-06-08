@@ -45,7 +45,7 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class DataSeeder implements CommandLineRunner {
-    private static final Set<String> CANONICAL_SHIFT_NAMES = Set.of("Evening Shift", "1st Shift", "2nd Shift");
+    private static final Set<String> CANONICAL_SHIFT_NAMES = Set.of("1st Shift", "2nd Shift");
     private static final Set<String> CORE_EMPLOYEE_USERNAMES = Set.of(
         "employee",
         "frida.mukamana",
@@ -85,7 +85,7 @@ public class DataSeeder implements CommandLineRunner {
             ));
 
         removeLegacyShiftModelData(branch);
-        deactivateExtraSeedEmployees(branch);
+        purgeExtraSeedEmployees(branch);
 
         User admin = upsertUser(
             "admin",
@@ -172,9 +172,9 @@ public class DataSeeder implements CommandLineRunner {
 
         LocalDate weekStart = LocalDate.now().with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.MONDAY));
         resetSeededWeeklyAssignments(branch, weekStart);
-        List<String> shiftNames = List.of("1st Shift", "2nd Shift", "Evening Shift");
-        List<LocalTime> shiftStarts = List.of(LocalTime.of(7, 0), LocalTime.of(15, 0), LocalTime.of(23, 0));
-        List<LocalTime> shiftEnds = List.of(LocalTime.of(15, 0), LocalTime.of(23, 0), LocalTime.of(7, 0));
+        List<String> shiftNames = List.of("1st Shift", "2nd Shift");
+        List<LocalTime> shiftStarts = List.of(LocalTime.of(7, 0), LocalTime.of(15, 0));
+        List<LocalTime> shiftEnds = List.of(LocalTime.of(15, 0), LocalTime.of(23, 0));
 
         java.util.Map<String, Shift> seededShifts = new java.util.HashMap<>();
         for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
@@ -194,18 +194,16 @@ public class DataSeeder implements CommandLineRunner {
             }
         }
 
-        Shift mondayNight = seededShifts.get(weekStart + "::Evening Shift");
         Shift mondayFirst = seededShifts.get(weekStart + "::1st Shift");
         Shift mondaySecond = seededShifts.get(weekStart + "::2nd Shift");
-        Shift tuesdayNight = seededShifts.get(weekStart.plusDays(1) + "::Evening Shift");
 
-        upsertAvailability(staff3, weekStart.plusDays(1), AvailabilityStatus.PREFERRED, LocalTime.of(23, 0), LocalTime.of(7, 0), "Available for overnight pharmacy assistant coverage.");
-        upsertAvailability(staff2, weekStart.plusDays(1), AvailabilityStatus.AVAILABLE, LocalTime.of(23, 0), LocalTime.of(7, 0), "Ready for overnight pharmacist coverage.");
+        upsertAvailability(staff3, weekStart.plusDays(1), AvailabilityStatus.PREFERRED, LocalTime.of(15, 0), LocalTime.of(23, 0), "Available for late pharmacy assistant coverage.");
+        upsertAvailability(staff2, weekStart.plusDays(1), AvailabilityStatus.AVAILABLE, LocalTime.of(15, 0), LocalTime.of(23, 0), "Ready for late pharmacist coverage.");
         upsertAvailability(staff5, weekStart.plusDays(2), AvailabilityStatus.UNAVAILABLE, null, null, "Off duty for personal leave.");
 
-        upsertAdjustment(pharmacist, mondaySecond, "Shift Swap", "Swap the second shift with another pharmacist for the Tuesday evening rotation.", AdjustmentStatus.PENDING, null);
-        upsertAdjustment(staff2, tuesdayNight, "Overtime Request", "Extend the overnight pharmacist coverage by one hour for stock receiving.", AdjustmentStatus.APPROVED, LocalDateTime.now().minusHours(6));
-        upsertAdjustment(staff3, mondayNight, "Time Off Request", "Request leave from the overnight pharmacy assistant shift for a family commitment.", AdjustmentStatus.REJECTED, LocalDateTime.now().minusDays(1));
+        upsertAdjustment(pharmacist, mondaySecond, "Shift Swap", "Swap the second shift with another pharmacist for the Tuesday second-shift rotation.", AdjustmentStatus.PENDING, null);
+        upsertAdjustment(staff2, seededShifts.get(weekStart.plusDays(1) + "::2nd Shift"), "Overtime Request", "Extend the late pharmacist coverage by one hour for stock receiving.", AdjustmentStatus.APPROVED, LocalDateTime.now().minusHours(6));
+        upsertAdjustment(staff3, mondayFirst, "Time Off Request", "Request leave from the first pharmacy assistant shift for a family commitment.", AdjustmentStatus.REJECTED, LocalDateTime.now().minusDays(1));
 
         upsertAnnouncement(
             branch,
@@ -222,10 +220,10 @@ public class DataSeeder implements CommandLineRunner {
             LocalDateTime.now().minusDays(1)
         );
 
-        upsertNotification(manager, "Weekly schedule published", "The roster for " + weekStart + " is fully assigned across all three daily shifts.", NotificationPriority.HIGH, false);
+        upsertNotification(manager, "Weekly schedule published", "The roster for " + weekStart + " is fully assigned across both daily shifts.", NotificationPriority.HIGH, false);
         upsertNotification(manager, "Shift swap request awaiting review", "Eric Ndayisaba submitted a live shift adjustment request for the second shift rota.", NotificationPriority.MEDIUM, false);
         upsertNotification(manager, "Compliance reminder", "Controlled medicines documentation is due before branch opening tomorrow.", NotificationPriority.LOW, true);
-        upsertNotification(pharmacist, "Upcoming overnight shift", "You are scheduled for overnight pharmacist coverage at 23:00.", NotificationPriority.MEDIUM, false);
+        upsertNotification(pharmacist, "Upcoming 2nd Shift", "You are scheduled for 2nd Shift pharmacist coverage at 15:00.", NotificationPriority.MEDIUM, false);
 
         upsertPolicy(branch, "Maximum Weekly Hours", "Staff may not exceed 48 total hours within a rolling 7-day period without branch manager approval.", "Scheduling", true);
         upsertPolicy(branch, "Mandatory Rest Period", "Maintain at least 11 continuous hours between closing and opening shifts for all pharmacy staff.", "Scheduling", true);
@@ -263,7 +261,7 @@ public class DataSeeder implements CommandLineRunner {
         ));
 
         upsertAuditLog(admin, "Updated pharmacy staffing policy", "Compliance", LocalDateTime.now().minusHours(9), "Reinforced handover coverage for controlled medicines at branch close.");
-        upsertAuditLog(manager, "Approved overtime request", "Scheduling", LocalDateTime.now().minusHours(6), "Approved extended pharmacy coverage support for the overnight rotation.");
+        upsertAuditLog(manager, "Approved overtime request", "Scheduling", LocalDateTime.now().minusHours(6), "Approved extended pharmacy coverage support for the second-shift rotation.");
         upsertAuditLog(manager, "Reviewed branch notification queue", "Notifications", LocalDateTime.now().minusHours(3), "Cleared one completed reminder and left urgent items active for follow-up.");
     }
 
@@ -296,15 +294,74 @@ public class DataSeeder implements CommandLineRunner {
         shiftRepository.deleteAll(legacyShifts);
     }
 
-    private void deactivateExtraSeedEmployees(Branch branch) {
-        userRepository.findByRole(Role.EMPLOYEE).stream()
+    private void purgeExtraSeedEmployees(Branch branch) {
+        List<User> extraSeedEmployees = userRepository.findByRole(Role.EMPLOYEE).stream()
             .filter(user -> user.getBranch() != null && user.getBranch().getId().equals(branch.getId()))
             .filter(user -> !CORE_EMPLOYEE_USERNAMES.contains(user.getUsername()))
-            .filter(User::isActive)
-            .forEach(user -> {
-                user.setActive(false);
-                userRepository.save(user);
-            });
+            .toList();
+
+        if (extraSeedEmployees.isEmpty()) {
+            recalculateBranchShiftCounts(branch);
+            return;
+        }
+
+        Set<Long> removedUserIds = extraSeedEmployees.stream()
+            .map(User::getId)
+            .collect(java.util.stream.Collectors.toSet());
+
+        employeeProfileRepository.deleteAll(
+            employeeProfileRepository.findAll().stream()
+                .filter(profile -> profile.getUser() != null && removedUserIds.contains(profile.getUser().getId()))
+                .toList()
+        );
+        availabilityRepository.deleteAll(
+            availabilityRepository.findAll().stream()
+                .filter(item -> item.getEmployee() != null && removedUserIds.contains(item.getEmployee().getId()))
+                .toList()
+        );
+        shiftAssignmentRepository.deleteAll(
+            shiftAssignmentRepository.findAll().stream()
+                .filter(item -> item.getEmployee() != null && removedUserIds.contains(item.getEmployee().getId()))
+                .toList()
+        );
+        shiftAdjustmentRequestRepository.deleteAll(
+            shiftAdjustmentRequestRepository.findAll().stream()
+                .filter(item ->
+                    (item.getEmployee() != null && removedUserIds.contains(item.getEmployee().getId())) ||
+                    (item.getTargetEmployee() != null && removedUserIds.contains(item.getTargetEmployee().getId()))
+                )
+                .toList()
+        );
+        notificationRepository.deleteAll(
+            notificationRepository.findAll().stream()
+                .filter(item -> item.getRecipient() != null && removedUserIds.contains(item.getRecipient().getId()))
+                .toList()
+        );
+        payrollRecordRepository.deleteAll(
+            payrollRecordRepository.findAll().stream()
+                .filter(item -> item.getEmployee() != null && removedUserIds.contains(item.getEmployee().getId()))
+                .toList()
+        );
+        auditLogRepository.deleteAll(
+            auditLogRepository.findAll().stream()
+                .filter(item -> item.getActor() != null && removedUserIds.contains(item.getActor().getId()))
+                .toList()
+        );
+        userRepository.deleteAll(extraSeedEmployees);
+        recalculateBranchShiftCounts(branch);
+    }
+
+    private void recalculateBranchShiftCounts(Branch branch) {
+        shiftRepository.findByBranchId(branch.getId()).forEach(shift -> {
+            int assigned = shiftAssignmentRepository.findByShiftId(shift.getId()).size();
+            shift.setAssignedStaff(assigned);
+            shift.setStatus(assigned >= shift.getRequiredStaff()
+                ? ShiftStatus.FULL
+                : assigned > 0
+                    ? ShiftStatus.PARTIALLY_STAFFED
+                    : ShiftStatus.UNDERSTAFFED);
+            shiftRepository.save(shift);
+        });
     }
 
     private void resetSeededWeeklyAssignments(Branch branch, LocalDate weekStart) {

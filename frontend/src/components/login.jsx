@@ -1,4 +1,5 @@
 import { startTransition, useState } from 'react'
+import { FiEye, FiEyeOff } from 'react-icons/fi'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
 import { saveSession } from '../lib/session'
@@ -18,11 +19,13 @@ function resolveDestination(role) {
 export default function Login() {
 	const navigate = useNavigate()
 	const location = useLocation()
+	const isExpiredRedirect = new URLSearchParams(location.search).get('expired') === '1'
 	const [form, setForm] = useState({ email: '', password: '', remember: false })
-	const [error, setError] = useState(location.state?.message || '')
+	const [error, setError] = useState(isExpiredRedirect ? 'Your session expired due to inactivity. Please sign in again.' : location.state?.message || '')
 	const [successMessage, setSuccessMessage] = useState('')
 	const [isSubmitting, setIsSubmitting] = useState(false)
 	const [isSendingReset, setIsSendingReset] = useState(false)
+	const [showPassword, setShowPassword] = useState(false)
 
 	async function handleLogin(credentials) {
 		setIsSubmitting(true)
@@ -145,14 +148,24 @@ export default function Login() {
 										{isSendingReset ? 'Sending...' : 'Forgot Password?'}
 									</a>
 								</div>
-								<input
-									type="password"
-									value={form.password}
-									onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-									placeholder="••••••••"
-									autoComplete="current-password"
-									className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 text-[18px] tracking-[0.3em] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
-								/>
+								<div className="relative">
+									<input
+										type={showPassword ? 'text' : 'password'}
+										value={form.password}
+										onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+										placeholder="••••••••"
+										autoComplete="current-password"
+										className="h-11 w-full rounded-md border border-slate-200 bg-[#f8faff] px-4 pr-12 text-[18px] tracking-[0.3em] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1051ff] focus:bg-white"
+									/>
+									<button
+										type="button"
+										onClick={() => setShowPassword((current) => !current)}
+										className="absolute inset-y-0 right-0 flex items-center justify-center px-3 text-slate-500 transition hover:text-[#1051ff]"
+										aria-label={showPassword ? 'Hide password' : 'Show password'}
+									>
+										{showPassword ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+									</button>
+								</div>
 							</div>
 
 							<label className="flex items-center gap-2 text-[12px] text-slate-600">

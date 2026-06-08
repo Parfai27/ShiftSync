@@ -1,13 +1,10 @@
 package com.shiftsync.backend.service;
 
 import com.shiftsync.backend.model.AuditLog;
-import com.shiftsync.backend.model.Notification;
-import com.shiftsync.backend.model.NotificationPriority;
 import com.shiftsync.backend.model.Shift;
 import com.shiftsync.backend.model.ShiftAssignment;
 import com.shiftsync.backend.model.User;
 import com.shiftsync.backend.repository.AuditLogRepository;
-import com.shiftsync.backend.repository.NotificationRepository;
 import com.shiftsync.backend.repository.ShiftAssignmentRepository;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +21,6 @@ public class ShiftReminderService {
 
     private final ShiftAssignmentRepository shiftAssignmentRepository;
     private final AuditLogRepository auditLogRepository;
-    private final NotificationRepository notificationRepository;
     private final CredentialEmailService credentialEmailService;
 
     @Scheduled(cron = "${app.shift-reminders.cron:0 0 * * * *}")
@@ -69,15 +65,6 @@ public class ShiftReminderService {
                     .build()
             );
 
-            notificationRepository.save(
-                Notification.builder()
-                    .title("Upcoming shift reminder")
-                    .message("A reminder email was sent for your upcoming " + shift.getName() + " on " + shift.getShiftDate() + ".")
-                    .priority(NotificationPriority.MEDIUM)
-                    .recipient(employee)
-                    .read(false)
-                    .build()
-            );
         }
     }
 }

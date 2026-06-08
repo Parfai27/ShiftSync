@@ -2,6 +2,7 @@ package com.shiftsync.backend.model;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.Column;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import java.time.LocalDateTime;
@@ -28,4 +29,10 @@ public class ShiftAssignment extends BaseEntity {
     private User employee;
 
     private LocalDateTime assignedAt;
+
+    @Column(name = "clocked_in_at")
+    private LocalDateTime clockedInAt;
+
+    @Column(name = "clocked_out_at")
+    private LocalDateTime clockedOutAt;
 }

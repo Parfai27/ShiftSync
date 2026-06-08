@@ -125,6 +125,31 @@ public class CredentialEmailService {
         }
     }
 
+    public boolean sendShiftChangeNotice(
+        String recipientEmail,
+        String employeeName,
+        String subjectLabel,
+        String summaryLine,
+        List<ShiftAssignment> assignments
+    ) {
+        if (!isMailConfigured()) {
+            return false;
+        }
+
+        try {
+            var message = mailSender.createMimeMessage();
+            var helper = new MimeMessageHelper(message, false, "UTF-8");
+            helper.setTo(recipientEmail);
+            helper.setFrom(fromAddress);
+            helper.setSubject(subjectLabel);
+            helper.setText(buildShiftChangeNoticeBody(employeeName, summaryLine, assignments), false);
+            mailSender.send(message);
+            return true;
+        } catch (MailException | jakarta.mail.MessagingException exception) {
+            return false;
+        }
+    }
+
     private String buildEmailBody(String employeeName, String recipientEmail, String temporaryPassword) {
         return """
             Hello %s,
@@ -248,5 +273,38 @@ public class CredentialEmailService {
             lines,
             frontendUrl
         );
+    }
+
+    private String buildShiftChangeNoticeBody(String employeeName, String summaryLine, List<ShiftAssignment> assignments) {
+        StringBuilder lines = new StringBuilder();
+        DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("EEEE, dd MMMM uuuu");
+        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
+
+        for (ShiftAssignment assignment : assignments) {
+            Shift shift = assignment.getShift();
+            lines.append("- ")
+                .append(shift.getShiftDate().format(dateFormatter))
+                .append(" | ")
+                .append(shift.getName())
+                .append(" | ")
+                .append(shift.getStartTime().format(timeFormatter))
+                .append(" - ")
+                .append(shift.getEndTime().format(timeFormatter))
+                .append(System.lineSeparator());
+        }
+
+        return """
+            Hello %s,
+
+            %s
+
+            Updated shifts:
+            %s
+
+            Open your schedule here: %s/employee-schedule
+
+            Regards,
+            ShiftSync
+            """.formatted(employeeName, summaryLine, lines, frontendUrl);
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
 	FiBell,
 	FiCalendar,
@@ -14,9 +14,9 @@ import {
 	FiSettings,
 	FiUser,
 } from 'react-icons/fi'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
-import { exportElementAsSvg } from '../../lib/export'
+import { buildBrandedReportDocument, buildDatedFilename, downloadBrandedReport, formatExportDate, requestExportDateRange, resolveShiftSyncLogoDataUrl } from '../../lib/export'
 import { clearSession, loadSession } from '../../lib/session'
 import EmployeeNotificationBell from '../shared/EmployeeNotificationBell'
 import EmployeeProfileMenu from '../shared/EmployeeProfileMenu'
@@ -75,6 +75,7 @@ function EmployeeSidebar() {
 
 export default function MySchedule() {
 	const navigate = useNavigate()
+	const location = useLocation()
 	const session = loadSession()
 	const [schedulePage, setSchedulePage] = useState(fallbackSchedule)
 	const [error, setError] = useState('')
@@ -89,6 +90,9 @@ export default function MySchedule() {
 	const [isSubmittingAdjustment, setIsSubmittingAdjustment] = useState(false)
 	const [adjustmentMessage, setAdjustmentMessage] = useState('')
 	const [adjustmentError, setAdjustmentError] = useState('')
+	const [attendanceMessage, setAttendanceMessage] = useState('')
+	const [attendanceError, setAttendanceError] = useState('')
+	const [attendanceBusyId, setAttendanceBusyId] = useState('')
 	const [respondingRequestId, setRespondingRequestId] = useState(null)
 	const calendarRef = useRef(null)
 
@@ -126,7 +130,7 @@ export default function MySchedule() {
 		}
 	}, [session?.userId])
 
-	async function refreshSchedule() {
+	const refreshSchedule = useCallback(async ({ silent = false } = {}) => {
 		if (!session?.userId) {
 			setError('No employee session found. Please log in again.')
 			return
@@ -134,13 +138,60 @@ export default function MySchedule() {
 
 		try {
 			setError('')
-			setIsLoading(true)
+			if (!silent) {
+				setIsLoading(true)
+			}
 			const data = await apiRequest(`/api/employee/schedule/${session.userId}`)
 			setSchedulePage(data)
 		} catch (loadError) {
 			setError(loadError.message || 'Unable to refresh your schedule.')
 		} finally {
-			setIsLoading(false)
+			if (!silent) {
+				setIsLoading(false)
+			}
+		}
+	}, [session?.userId])
+
+	useEffect(() => {
+		if (!session?.userId) {
+			return undefined
+		}
+
+		const intervalId = window.setInterval(() => {
+			void refreshSchedule({ silent: true })
+		}, 3000)
+
+		return () => window.clearInterval(intervalId)
+	}, [refreshSchedule, session?.userId])
+
+	useEffect(() => {
+		if (location.hash !== '#adjustments') {
+			return
+		}
+
+		const el = document.getElementById('adjustments')
+		if (el) {
+			el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+		}
+	}, [location.hash, schedulePage.outgoingAdjustments.length, schedulePage.incomingSwapRequests.length])
+
+	async function handleAttendanceAction(shiftId, action) {
+		if (!session?.userId) {
+			setAttendanceError('No employee session found. Please log in again.')
+			return
+		}
+
+		try {
+			setAttendanceError('')
+			setAttendanceMessage('')
+			setAttendanceBusyId(shiftId)
+			await apiRequest(`/api/employee/attendance/${session.userId}/${shiftId}/${action}`, { method: 'POST' })
+			setAttendanceMessage(action === 'clock-in' ? 'Clock-in recorded successfully.' : 'Clock-out recorded successfully.')
+			await refreshSchedule()
+		} catch (attendanceFailure) {
+			setAttendanceError(attendanceFailure.message || 'Unable to update attendance right now.')
+		} finally {
+			setAttendanceBusyId('')
 		}
 	}
 
@@ -211,14 +262,76 @@ export default function MySchedule() {
 		window.print()
 	}
 
-	function handleExportCalendar() {
-		if (!calendarRef.current) {
-			setError('There is no calendar view available to export right now.')
-			return
-		}
+	async function handleExportCalendar() {
 		try {
+			const dateRange = await requestExportDateRange('Export employee schedule report')
+			if (!dateRange) {
+				return
+			}
+			const logoUrl = await resolveShiftSyncLogoDataUrl()
 			setError('')
-			exportElementAsSvg(calendarRef.current, 'employee-schedule-calendar.svg')
+			const weekRows = schedulePage.weekDays.map((day) => [day.day, day.date, day.active ? 'Active' : 'Off'])
+			const shiftRows = schedulePage.assignedShifts.map((shift) => [
+				shift.shiftName,
+				shift.shiftDate,
+				shift.shiftWindow,
+				shift.attendanceState,
+				shift.clockedInAt || 'Pending',
+				shift.clockedOutAt || 'Pending',
+			])
+			await downloadBrandedReport(
+				buildDatedFilename('employee-schedule-calendar', dateRange, 'pdf'),
+				buildBrandedReportDocument({
+					logoUrl,
+					brandName: 'ShiftSync',
+				brandSubtitle: 'ShiftSync employee workspace',
+				reportTitle: 'Employee Schedule Snapshot',
+				reportSubtitle: 'Weekly shift roster, attendance tracker, and schedule highlights.',
+				generatedAt: new Date().toISOString(),
+				periodLabel: `${formatExportDate(dateRange.from)} to ${formatExportDate(dateRange.to)}`,
+				preparedBy: schedulePage.employeeName || 'ShiftSync',
+				preparedByEmail: session?.email || 'noreply@shiftsync.local',
+				summaryCards: [
+					{ label: 'Assigned Shifts', value: `${schedulePage.assignedShifts.length}`, detail: 'Visible in the current schedule view', highlighted: true },
+					{ label: 'Open Shifts', value: `${schedulePage.openShiftCount || 0}`, detail: 'Available pickups' },
+					{ label: 'Notifications', value: `${schedulePage.notifications.length}`, detail: 'Schedule alerts and updates' },
+				],
+				metadataRows: [
+					['Employee', schedulePage.employeeName],
+					['Role', schedulePage.roleLabel],
+					['Summary', schedulePage.scheduleSummary || 'Live employee schedule'],
+				],
+				sections: [
+					{
+						title: 'Week Summary',
+						description: 'A quick view of the current week and active days.',
+					columns: [
+						{ label: 'Day', nowrap: true },
+						{ label: 'Date', nowrap: true },
+						{ label: 'Status', nowrap: true },
+					],
+						rows: weekRows,
+					},
+					{
+						title: 'Assigned Shifts',
+						description: 'Attendance tracker data with real clock-in and clock-out timestamps.',
+					columns: [
+						{ label: 'Shift' },
+						{ label: 'Date', nowrap: true },
+						{ label: 'Window', nowrap: true },
+						{ label: 'Attendance', nowrap: true },
+						{ label: 'Clock In', nowrap: true },
+						{ label: 'Clock Out', nowrap: true },
+					],
+						rows: shiftRows,
+					},
+				],
+				footerLeft: `${schedulePage.assignedShifts.length} assigned shift(s)`,
+				footerRight: `${schedulePage.openShiftCount || 0} open shift(s)`,
+				footerNote: 'This printable export reflects the live employee schedule and attendance tracker.',
+			})
+			)
+			setError('')
 		} catch (exportError) {
 			setError(exportError.message || 'Unable to export your schedule calendar.')
 		}
@@ -360,8 +473,75 @@ export default function MySchedule() {
 								</div>
 								<div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-slate-100 pt-4 text-sm text-slate-500">
 									<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handlePrint} title="Print schedule" type="button"><FiPrinter className="h-4 w-4" /></button>
-									<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handleExportCalendar} title="Export calendar" type="button"><FiDownload className="h-4 w-4" /></button>
+									<button className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600" onClick={handleExportCalendar} title="Export report" type="button"><FiDownload className="h-4 w-4" /></button>
 								</div>
+							</div>
+						</section>
+
+						<section id="adjustments" className="mt-5 rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-6">
+							<div className="flex flex-col gap-2">
+								<h2 className="text-2xl font-black tracking-[-0.05em] text-slate-950">Attendance Tracker</h2>
+								<p className="text-sm text-slate-500">Clock in and clock out for assigned shifts. The manager compliance log will read these real timestamps.</p>
+							</div>
+
+							{attendanceError ? <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{attendanceError}</div> : null}
+							{attendanceMessage ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{attendanceMessage}</div> : null}
+
+							<div className="mt-4 grid gap-3 lg:grid-cols-2">
+								{schedulePage.assignedShifts.length ? schedulePage.assignedShifts.map((shift) => (
+									<div key={shift.shiftId} className="rounded-2xl border border-slate-200 bg-[#f8faff] p-4">
+										<div className="flex flex-wrap items-start justify-between gap-3">
+											<div>
+												<div className="text-sm font-black text-slate-950">{shift.shiftName}</div>
+												<div className="mt-1 text-xs text-slate-500">{shift.shiftDate} • {shift.shiftWindow}</div>
+											</div>
+											<span className={`rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] ${shift.attendanceState === 'Pending manager approval' ? 'bg-amber-100 text-amber-700' : 'bg-[#e8eeff] text-[#0f51ff]'}`}>{shift.attendanceState}</span>
+										</div>
+										<div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
+											<div>
+												<div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Clock In</div>
+												<div className="mt-1 font-semibold text-slate-950">{shift.clockedInAt || 'Pending'}</div>
+											</div>
+											<div>
+												<div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Clock Out</div>
+												<div className="mt-1 font-semibold text-slate-950">{shift.clockedOutAt || 'Pending'}</div>
+											</div>
+											<div>
+												<div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Status</div>
+												<div className="mt-1 font-semibold text-slate-950">{shift.attendanceState}</div>
+											</div>
+										</div>
+										<div className="mt-4 flex flex-wrap gap-2">
+											{shift.attendanceState !== 'Completed' ? (
+												shift.attendanceState === 'Clocked In' ? (
+													<button
+														className="inline-flex items-center gap-2 rounded-xl bg-[#0f51ff] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#0b44de] disabled:cursor-not-allowed disabled:opacity-60"
+														disabled={attendanceBusyId === shift.shiftId}
+														onClick={() => handleAttendanceAction(shift.shiftId, 'clock-out')}
+														type="button"
+													>
+														<FiClock className="h-4 w-4" />
+														{attendanceBusyId === shift.shiftId ? 'Recording...' : 'Clock Out'}
+													</button>
+												) : (
+													<button
+														className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+														disabled={attendanceBusyId === shift.shiftId}
+														onClick={() => handleAttendanceAction(shift.shiftId, 'clock-in')}
+														type="button"
+													>
+														<FiClock className="h-4 w-4" />
+														{attendanceBusyId === shift.shiftId ? 'Recording...' : 'Clock In'}
+													</button>
+												)
+											) : (
+												<div className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-slate-500">Attendance completed for this shift.</div>
+											)}
+										</div>
+									</div>
+								)) : (
+									<div className="rounded-2xl border border-slate-200 bg-[#f8faff] p-4 text-sm text-slate-500">No assigned shifts are available for attendance tracking yet.</div>
+								)}
 							</div>
 						</section>
 

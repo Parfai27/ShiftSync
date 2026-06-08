@@ -1,35 +1,35 @@
-import { buildDatedFilename, downloadJson, downloadText, rowsToCsv } from './export'
+import { buildBrandedReportDocument, buildDatedFilename, downloadBrandedReport, formatExportDate, resolveShiftSyncLogoDataUrl } from './export'
 
 export const REPORT_EXPORT_OPTIONS = [
 	{
 		id: 'executive-summary',
 		label: 'Executive Weekly Summary',
-		description: 'Headline: headline KPIs, capacity score, and branch context for leadership review.',
-		formats: ['csv', 'json'],
+		description: 'A branded leadership report with headline KPIs and a weekly summary table.',
+		formats: ['html'],
 	},
 	{
 		id: 'weekly-coverage',
 		label: 'Weekly Coverage Trend',
-		description: 'Day-by-day staffing coverage percentages for the current reporting window.',
-		formats: ['csv', 'json'],
+		description: 'A branded weekly coverage report with the day-by-day staffing trend.',
+		formats: ['html'],
 	},
 	{
 		id: 'department-mix',
 		label: 'Department & Team Mix',
-		description: 'Headcount distribution across pharmacy departments with share percentages.',
-		formats: ['csv', 'json'],
+		description: 'A branded workforce mix report showing headcount distribution by department.',
+		formats: ['html'],
 	},
 	{
 		id: 'compliance-log',
 		label: 'Shift Compliance Log',
-		description: 'Detailed assignment log with shift dates, punch-in times, and compliance status.',
-		formats: ['csv', 'json'],
+		description: 'A branded compliance report with punch in/out data and risk status.',
+		formats: ['html'],
 	},
 	{
 		id: 'complete-pack',
 		label: 'Complete Analytics Pack',
-		description: 'All weekly analyses combined into one structured workbook-style CSV.',
-		formats: ['csv'],
+		description: 'One polished printable report containing all weekly analytics sections.',
+		formats: ['html'],
 	},
 ]
 
@@ -48,173 +48,354 @@ function buildCoverageSeries(reports) {
 	}))
 }
 
-export function buildReportExport({ type, reports, manager, searchTerm, scope = 'full' }) {
-	const branchName = manager?.branchName || 'Ngabo Pharmacy'
-	const generatedAt = new Date().toISOString()
-	const searchLabel = searchTerm?.trim() ? searchTerm.trim() : 'None'
+function buildSummaryCards(reports, branchName) {
+	return (reports.metrics || []).slice(0, 3).map((item, index) => ({
+		label: item.title,
+		value: item.value,
+		detail: item.delta || branchName,
+		highlighted: index === 0,
+	}))
+}
 
+function buildDateRangeLabel(dateRange) {
+	if (!dateRange?.from || !dateRange?.to) {
+		return 'Current reporting window'
+	}
+
+	return `${formatExportDate(dateRange.from)} to ${formatExportDate(dateRange.to)}`
+}
+
+function parseRangeBound(value, endOfDay = false) {
+	const date = new Date(value)
+	if (Number.isNaN(date.getTime())) {
+		return null
+	}
+
+	if (endOfDay) {
+		date.setHours(23, 59, 59, 999)
+	} else {
+		date.setHours(0, 0, 0, 0)
+	}
+
+	return date
+}
+
+function matchesDateRange(rowDate, dateRange) {
+	if (!dateRange?.from || !dateRange?.to) {
+		return true
+	}
+
+	const start = parseRangeBound(dateRange.from)
+	const end = parseRangeBound(dateRange.to, true)
+	const current = new Date(rowDate)
+	if (!start || !end || Number.isNaN(current.getTime())) {
+		return true
+	}
+
+	return current >= start && current <= end
+}
+
+function buildExecutiveSummaryDocument({ reports, manager, session, generatedAt, branchName, dateRange }) {
+	return {
+		brandName: branchName,
+		brandSubtitle: 'ShiftSync workforce operations',
+		reportTitle: 'Executive Weekly Summary',
+		reportSubtitle: 'Headline staffing indicators for leadership review.',
+		generatedAt,
+		periodLabel: buildDateRangeLabel(dateRange),
+		preparedBy: manager?.fullName || 'ShiftSync',
+		preparedByEmail: session?.email || manager?.email || 'noreply@shiftsync.local',
+		summaryCards: buildSummaryCards(reports, branchName),
+		metadataRows: [
+			['Workspace', branchName],
+			['Capacity Score', `${reports.capacityPercent ?? 0}%`],
+			['Metric Count', `${(reports.metrics || []).length}`],
+			['Summary', reports.summary || 'Live staffing summary generated from the current week.'],
+		],
+		sections: [
+			{
+				title: 'Weekly KPI Summary',
+				description: 'Core staffing indicators pulled from the current reporting window.',
+				columns: ['Metric', 'Value', 'Delta'],
+				rows: (reports.metrics || []).map((item) => [item.title, item.value, item.delta || '—']),
+			},
+		],
+		footerLeft: `${(reports.metrics || []).length} metrics reviewed`,
+		footerRight: `Capacity score: ${reports.capacityPercent ?? 0}%`,
+		footerNote: `Report generated for ${branchName}.`,
+	}
+}
+
+function buildCoverageDocument({ reports, manager, session, generatedAt, branchName, dateRange }) {
+	const coverageSeries = buildCoverageSeries(reports)
+	const bestDay = [...coverageSeries].sort((a, b) => b.coveragePercent - a.coveragePercent)[0]
+	const lowestDay = [...coverageSeries].sort((a, b) => a.coveragePercent - b.coveragePercent)[0]
+	const averageCoverage = coverageSeries.length
+		? Math.round(coverageSeries.reduce((sum, item) => sum + item.coveragePercent, 0) / coverageSeries.length)
+		: 0
+
+	return {
+		brandName: branchName,
+		brandSubtitle: 'ShiftSync workforce operations',
+		reportTitle: 'Weekly Coverage Trend',
+		reportSubtitle: 'A printable day-by-day staffing coverage report.',
+		generatedAt,
+		periodLabel: buildDateRangeLabel(dateRange),
+		preparedBy: manager?.fullName || 'ShiftSync',
+		preparedByEmail: session?.email || manager?.email || 'noreply@shiftsync.local',
+		summaryCards: [
+			{ label: 'Average Coverage', value: `${averageCoverage}%`, detail: 'Across the visible week', highlighted: true },
+			{ label: 'Best Day', value: bestDay ? `${bestDay.coveragePercent}%` : '0%', detail: bestDay?.day || 'No data' },
+			{ label: 'Lowest Day', value: lowestDay ? `${lowestDay.coveragePercent}%` : '0%', detail: lowestDay?.day || 'No data' },
+		],
+		metadataRows: [
+			['Workspace', branchName],
+			['Coverage Days', `${coverageSeries.length}`],
+			['Healthy Target', '90% or above'],
+		],
+		sections: [
+			{
+				title: 'Coverage by Day',
+				description: 'Filled coverage versus open capacity in the selected window.',
+				columns: ['Day', 'Coverage %', 'Gap %'],
+				rows: coverageSeries.map((item) => [
+					item.day,
+					`${item.coveragePercent}%`,
+					`${Math.max(0, 100 - item.coveragePercent)}%`,
+				]),
+			},
+		],
+		footerLeft: `${coverageSeries.length} day(s) tracked`,
+		footerRight: `Average coverage: ${averageCoverage}%`,
+		footerNote: `Best coverage day: ${bestDay?.day || 'N/A'} · Lowest coverage day: ${lowestDay?.day || 'N/A'}`,
+	}
+}
+
+function buildDepartmentDocument({ reports, manager, session, generatedAt, branchName, dateRange }) {
+	const distribution = distributionWithPercentages(reports.distribution || [])
+	if (!distribution.length) {
+		throw new Error('No department distribution data is available to export.')
+	}
+
+	return {
+		brandName: branchName,
+		brandSubtitle: 'ShiftSync workforce operations',
+		reportTitle: 'Department & Team Mix',
+		reportSubtitle: 'A workforce composition report with department shares.',
+		generatedAt,
+		periodLabel: buildDateRangeLabel(dateRange),
+		preparedBy: manager?.fullName || 'ShiftSync',
+		preparedByEmail: session?.email || manager?.email || 'noreply@shiftsync.local',
+		summaryCards: [
+			{ label: 'Active Segments', value: `${distribution.length}`, detail: 'Department groups represented', highlighted: true },
+			{ label: 'Largest Segment', value: `${Math.max(...distribution.map((item) => item.percent))}%`, detail: 'Highest share' },
+			{ label: 'Total Headcount', value: `${distribution.reduce((sum, item) => sum + item.value, 0)}`, detail: 'Visible workforce' },
+		],
+		metadataRows: [
+			['Workspace', branchName],
+			['Department Segments', `${distribution.length}`],
+		],
+		sections: [
+			{
+				title: 'Department Mix Table',
+				description: 'Live headcount distribution across the selected workforce slice.',
+				columns: ['Department', 'Headcount', 'Share %'],
+				rows: distribution.map((item) => [item.label, `${item.value}`, `${item.percent}%`]),
+			},
+		],
+		footerLeft: `${distribution.length} department segment(s)`,
+		footerRight: `Headcount: ${distribution.reduce((sum, item) => sum + item.value, 0)}`,
+		footerNote: `Distribution is based on the current filtered team view for ${branchName}.`,
+	}
+}
+
+function buildComplianceDocument({ reports, manager, session, generatedAt, branchName, scope = 'full', searchTerm = '', dateRange }) {
+	const searchLabel = searchTerm.trim() ? searchTerm.trim() : 'None'
+	const rangeFilteredRows = (reports.recentCompliance || []).filter((row) => matchesDateRange(row.date, dateRange))
 	const complianceRows = scope === 'filtered'
-		? filterCompliance(reports.recentCompliance, searchTerm)
-		: reports.recentCompliance || []
+		? filterCompliance(rangeFilteredRows, searchTerm)
+		: rangeFilteredRows
 
+	if (!complianceRows.length) {
+		throw new Error('No compliance log rows are available to export.')
+	}
+
+	return {
+		brandName: branchName,
+		brandSubtitle: 'ShiftSync workforce operations',
+		reportTitle: 'Shift Compliance Log',
+		reportSubtitle: 'A detailed attendance report with punch-in and punch-out timestamps.',
+		generatedAt,
+		periodLabel: `${buildDateRangeLabel(dateRange)}${scope === 'filtered' ? ` · Filtered by search: ${searchLabel}` : ''}`,
+		preparedBy: manager?.fullName || 'ShiftSync',
+		preparedByEmail: session?.email || manager?.email || 'noreply@shiftsync.local',
+		summaryCards: [
+			{ label: 'Rows Exported', value: `${complianceRows.length}`, detail: 'Visible compliance entries', highlighted: true },
+			{ label: 'Risk Flags', value: `${complianceRows.filter((row) => row.danger).length}`, detail: 'Coverage gaps' },
+			{ label: 'Safe Entries', value: `${complianceRows.filter((row) => !row.danger).length}`, detail: 'Normal status rows' },
+		],
+		metadataRows: [
+			['Workspace', branchName],
+			['Scope', scope === 'filtered' ? 'Current search results' : 'Full log'],
+			['Search', searchLabel],
+		],
+		sections: [
+			{
+				title: 'Recent Shift Compliance',
+				description: 'Actual attendance and schedule status pulled from the current manager view.',
+				columns: [
+					{ label: 'Employee' },
+					{ label: 'Employee ID', nowrap: true },
+					{ label: 'Shift Date', nowrap: true },
+					{ label: 'Department' },
+					{ label: 'Punch In', nowrap: true },
+					{ label: 'Punch Out', nowrap: true },
+					{ label: 'Status', nowrap: true },
+					{ label: 'Risk Flag', nowrap: true },
+				],
+				rows: complianceRows.map((row) => [
+					row.name,
+					row.id,
+					row.date,
+					row.department,
+					row.punchIn,
+					row.punchOut || 'Pending',
+					row.status,
+					row.danger ? 'Coverage Gap' : 'Normal',
+				]),
+			},
+		],
+		footerLeft: `${complianceRows.length} compliance row(s)`,
+		footerRight: `${complianceRows.filter((row) => row.danger).length} risk flags`,
+		footerNote: 'Punch out values show the recorded attendance checkout timestamp when available.',
+	}
+}
+
+function buildCompletePackDocument({ reports, manager, session, generatedAt, branchName, dateRange }) {
 	const coverageSeries = buildCoverageSeries(reports)
 	const distribution = distributionWithPercentages(reports.distribution || [])
+	const complianceRows = reports.recentCompliance || []
+
+	return {
+		brandName: branchName,
+		brandSubtitle: 'ShiftSync workforce operations',
+		reportTitle: 'Complete Analytics Pack',
+		reportSubtitle: 'A printable workbook-style export with every weekly analytics section.',
+		generatedAt,
+		periodLabel: buildDateRangeLabel(dateRange),
+		preparedBy: manager?.fullName || 'ShiftSync',
+		preparedByEmail: session?.email || manager?.email || 'noreply@shiftsync.local',
+		summaryCards: buildSummaryCards(reports, branchName),
+		metadataRows: [
+			['Workspace', branchName],
+			['Coverage Days', `${coverageSeries.length}`],
+			['Department Segments', `${distribution.length}`],
+			['Compliance Rows', `${complianceRows.length}`],
+		],
+		sections: [
+			{
+				title: 'Executive Weekly Summary',
+				columns: ['Metric', 'Value', 'Delta'],
+				rows: (reports.metrics || []).map((item) => [item.title, item.value, item.delta || '—']),
+			},
+			{
+				title: 'Weekly Coverage Trend',
+				columns: ['Day', 'Coverage %', 'Gap %'],
+				rows: coverageSeries.map((item) => [item.day, `${item.coveragePercent}%`, `${Math.max(0, 100 - item.coveragePercent)}%`]),
+			},
+			{
+				title: 'Department & Team Mix',
+				columns: ['Department', 'Headcount', 'Share %'],
+				rows: distribution.map((item) => [item.label, `${item.value}`, `${item.percent}%`]),
+			},
+			{
+				title: 'Shift Compliance Log',
+				columns: [
+					{ label: 'Employee' },
+					{ label: 'Employee ID', nowrap: true },
+					{ label: 'Shift Date', nowrap: true },
+					{ label: 'Department' },
+					{ label: 'Punch In', nowrap: true },
+					{ label: 'Punch Out', nowrap: true },
+					{ label: 'Status', nowrap: true },
+					{ label: 'Risk Flag', nowrap: true },
+				],
+				rows: complianceRows.map((row) => [
+					row.name,
+					row.id,
+					row.date,
+					row.department,
+					row.punchIn,
+					row.punchOut || 'Pending',
+					row.status,
+					row.danger ? 'Coverage Gap' : 'Normal',
+				]),
+			},
+		],
+		footerLeft: `${(reports.metrics || []).length} metrics • ${coverageSeries.length} days • ${distribution.length} segments`,
+		footerRight: `${complianceRows.length} compliance entries`,
+		footerNote: `Complete analytics pack exported for ${branchName}.`,
+	}
+}
+
+export function buildReportExport({ type, reports, manager, session, searchTerm, scope = 'full', dateRange }) {
+	const branchName = manager?.branchName || 'Ngabo Pharmacy'
+	const generatedAt = new Date().toISOString()
 
 	if (type === 'executive-summary') {
-		const csvRows = [
-			['ShiftSync Executive Weekly Summary'],
-			['Generated', generatedAt],
-			['Branch', branchName],
-			['Reporting Window', 'Current week (7-day coverage view)'],
-			[],
-			['Metric', 'Value', 'Delta'],
-			...(reports.metrics || []).map((item) => [item.title, item.value, item.delta]),
-			[],
-			['Capacity Score', `${reports.capacityPercent ?? 0}%`],
-			['Summary', reports.summary || ''],
-		]
-
-		const json = {
-			meta: { exportType: 'executive-summary', generatedAt, branch: branchName },
-			summary: reports.summary,
-			capacityPercent: reports.capacityPercent,
-			metrics: reports.metrics,
-		}
-
 		return {
-			csv: rowsToCsv(csvRows),
-			json,
 			filenameBase: 'weekly-executive-summary',
 			summary: 'Executive weekly summary exported.',
+			document: buildExecutiveSummaryDocument({ reports, manager, session, generatedAt, branchName, dateRange }),
 		}
 	}
 
 	if (type === 'weekly-coverage') {
-		const csvRows = [
-			['ShiftSync Weekly Coverage Trend'],
-			['Generated', generatedAt],
-			['Branch', branchName],
-			[],
-			['Day', 'Coverage %', 'Gap %'],
-			...coverageSeries.map((item) => [item.day, item.coveragePercent, Math.max(0, 100 - item.coveragePercent)]),
-		]
-
-		const json = {
-			meta: { exportType: 'weekly-coverage', generatedAt, branch: branchName },
-			series: coverageSeries,
-		}
-
 		return {
-			csv: rowsToCsv(csvRows),
-			json,
 			filenameBase: 'weekly-coverage-trend',
-			summary: `${coverageSeries.length}-day coverage trend exported.`,
+			summary: `${(reports.weekLabels || []).length}-day coverage trend exported.`,
+			document: buildCoverageDocument({ reports, manager, session, generatedAt, branchName, dateRange }),
 		}
 	}
 
 	if (type === 'department-mix') {
-		if (!distribution.length) {
-			throw new Error('No department distribution data is available to export.')
-		}
-
-		const csvRows = [
-			['ShiftSync Department & Team Mix'],
-			['Generated', generatedAt],
-			['Branch', branchName],
-			[],
-			['Department', 'Headcount', 'Share %'],
-			...distribution.map((item) => [item.label, item.value, item.percent]),
-		]
-
-		const json = {
-			meta: { exportType: 'department-mix', generatedAt, branch: branchName },
-			distribution,
-		}
-
 		return {
-			csv: rowsToCsv(csvRows),
-			json,
 			filenameBase: 'department-team-mix',
-			summary: `${distribution.length} department segment(s) exported.`,
+			summary: `${(reports.distribution || []).length} department segment(s) exported.`,
+			document: buildDepartmentDocument({ reports, manager, session, generatedAt, branchName, dateRange }),
 		}
 	}
 
 	if (type === 'compliance-log') {
-		if (!complianceRows.length) {
-			throw new Error('No compliance log rows are available to export.')
-		}
-
-		const csvRows = [
-			['ShiftSync Shift Compliance Log'],
-			['Generated', generatedAt],
-			['Branch', branchName],
-			['Scope', scope === 'filtered' ? `Filtered by search: ${searchLabel}` : 'Full log'],
-			[],
-			['Employee', 'Employee ID', 'Shift Date', 'Department', 'Punch In', 'Status', 'Risk Flag'],
-			...complianceRows.map((row) => [row.name, row.id, row.date, row.department, row.punchIn, row.status, row.danger ? 'Coverage Gap' : 'Normal']),
-		]
-
-		const json = {
-			meta: { exportType: 'compliance-log', generatedAt, branch: branchName, scope, search: searchLabel },
-			rows: complianceRows,
-		}
-
 		return {
-			csv: rowsToCsv(csvRows),
-			json,
 			filenameBase: 'shift-compliance-log',
-			summary: `${complianceRows.length} compliance log row(s) exported.`,
+			summary: 'Compliance log exported successfully.',
+			document: buildComplianceDocument({ reports, manager, session, generatedAt, branchName, scope, searchTerm, dateRange }),
 		}
 	}
 
 	if (type === 'complete-pack') {
-		const sections = [
-			['ShiftSync Complete Analytics Pack'],
-			['Generated', generatedAt],
-			['Branch', branchName],
-			['Reporting Window', 'Current week (7-day coverage view)'],
-			[],
-			['=== EXECUTIVE SUMMARY ==='],
-			['Metric', 'Value', 'Delta'],
-			...(reports.metrics || []).map((item) => [item.title, item.value, item.delta]),
-			['Capacity Score', `${reports.capacityPercent ?? 0}%`],
-			[],
-			['=== WEEKLY COVERAGE TREND ==='],
-			['Day', 'Coverage %', 'Gap %'],
-			...coverageSeries.map((item) => [item.day, item.coveragePercent, Math.max(0, 100 - item.coveragePercent)]),
-			[],
-			['=== DEPARTMENT & TEAM MIX ==='],
-			['Department', 'Headcount', 'Share %'],
-			...distribution.map((item) => [item.label, item.value, item.percent]),
-			[],
-			['=== SHIFT COMPLIANCE LOG ==='],
-			['Employee', 'Employee ID', 'Shift Date', 'Department', 'Punch In', 'Status', 'Risk Flag'],
-			...complianceRows.map((row) => [row.name, row.id, row.date, row.department, row.punchIn, row.status, row.danger ? 'Coverage Gap' : 'Normal']),
-		]
-
 		return {
-			csv: rowsToCsv(sections),
-			json: null,
 			filenameBase: 'complete-analytics-pack',
 			summary: 'Complete analytics pack exported with all weekly sections.',
+			document: buildCompletePackDocument({ reports, manager, session, generatedAt, branchName, dateRange }),
 		}
 	}
 
 	throw new Error('Choose a report type before exporting.')
 }
 
-export function executeReportExport({ type, format, ...context }) {
-	const payload = buildReportExport({ type, ...context })
-
-	if (format === 'json') {
-		if (!payload.json) {
-			throw new Error('This report type is only available as CSV.')
-		}
-		downloadJson(payload.json, buildDatedFilename(payload.filenameBase, 'json'))
-	} else {
-		downloadText(payload.csv, buildDatedFilename(payload.filenameBase, 'csv'), 'text/csv;charset=utf-8;')
+export async function executeReportExport({ type, format, ...context }) {
+	if (format !== 'html') {
+		throw new Error('Printable report is the only available export format.')
 	}
 
+	const payload = buildReportExport({ type, ...context })
+	const logoUrl = await resolveShiftSyncLogoDataUrl()
+	await downloadBrandedReport(
+		buildDatedFilename(payload.filenameBase, context.dateRange, 'pdf'),
+		buildBrandedReportDocument({ ...payload.document, logoUrl }),
+	)
 	return payload.summary
 }
 
@@ -224,5 +405,5 @@ function filterCompliance(rows, searchTerm) {
 		return rows
 	}
 
-	return rows.filter((row) => [row.name, row.id, row.date, row.department, row.punchIn, row.status].join(' ').toLowerCase().includes(query))
+	return rows.filter((row) => [row.name, row.id, row.date, row.department, row.punchIn, row.punchOut, row.status].join(' ').toLowerCase().includes(query))
 }

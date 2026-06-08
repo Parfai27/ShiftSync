@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { FiDownload, FiUsers } from 'react-icons/fi'
 import AdminFrame from './AdminFrame.jsx'
 import { getAdminUsers, resetAdminUserCredentials, updateAdminUserRole, updateAdminUserStatus } from '../../lib/adminWorkspace'
-import { downloadCsv } from '../../lib/export'
+import { buildBrandedReportDocument, buildDatedFilename, downloadBrandedReport, formatExportDate, requestExportDateRange, resolveShiftSyncLogoDataUrl } from '../../lib/export'
 import { loadSession } from '../../lib/session'
 
 const fallbackData = {
@@ -66,12 +66,63 @@ export default function UserManagement() {
 		})
 	}, [data.users, roleFilter, search])
 
-	function handleExport() {
-		const header = 'Full Name,Email,Role,Status,Workspace\n'
-		const rows = filteredUsers
-			.map((user) => `"${user.fullName}","${user.email}","${user.role}","${user.active ? 'Active' : 'Inactive'}","${user.branchLabel}"`)
-			.join('\n')
-		downloadCsv(`${header}${rows}`, 'admin-user-directory.csv')
+	async function handleExport() {
+		try {
+			const dateRange = await requestExportDateRange('Export user directory report')
+			if (!dateRange) {
+				return
+			}
+			const logoUrl = await resolveShiftSyncLogoDataUrl()
+			await downloadBrandedReport(
+				buildDatedFilename('admin-user-directory', dateRange, 'pdf'),
+				buildBrandedReportDocument({
+					logoUrl,
+					brandName: 'ShiftSync Administration',
+				brandSubtitle: 'Admin workforce registry',
+				reportTitle: 'User Management Directory',
+				reportSubtitle: 'A printable account directory for admin review and access control.',
+				generatedAt: new Date().toISOString(),
+				periodLabel: `${formatExportDate(dateRange.from)} to ${formatExportDate(dateRange.to)}`,
+				preparedBy: session?.fullName || 'ShiftSync Admin',
+				preparedByEmail: session?.email || 'noreply@shiftsync.local',
+				summaryCards: [
+					{ label: 'Total Users', value: `${data.totalUsers}`, detail: 'All directory entries', highlighted: true },
+					{ label: 'Active Accounts', value: `${data.activeUsers}`, detail: 'Enabled for sign-in' },
+					{ label: 'Inactive Accounts', value: `${data.inactiveUsers}`, detail: 'Disabled or archived' },
+				],
+				metadataRows: [
+					['Role Filter', roleFilter],
+					['Search', search.trim() || 'None'],
+					['Visible Rows', `${filteredUsers.length}`],
+				],
+				sections: [
+					{
+						title: 'User Directory',
+						description: 'Visible accounts with workspace and access status.',
+					columns: [
+						{ label: 'Full Name' },
+						{ label: 'Email' },
+						{ label: 'Role' },
+						{ label: 'Status', nowrap: true },
+						{ label: 'Workspace' },
+					],
+						rows: filteredUsers.map((user) => [
+							user.fullName,
+							user.email,
+							user.role,
+							user.active ? 'Active' : 'Inactive',
+							user.branchLabel,
+						]),
+					},
+				],
+				footerLeft: `${filteredUsers.length} user row(s)`,
+				footerRight: `Active: ${data.activeUsers} • Inactive: ${data.inactiveUsers}`,
+				footerNote: 'This printable directory reflects the current admin filter state.',
+			})
+			)
+		} catch (exportError) {
+			setError(exportError.message || 'Unable to export the user directory.')
+		}
 	}
 
 	async function reloadUsers() {
@@ -151,7 +202,7 @@ export default function UserManagement() {
 			onSearchChange={setSearch}
 			headerActions={(
 				<button className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-[#eef2ff] px-4 text-xs font-bold text-[#1f3b9c] transition hover:bg-[#e3eafe]" onClick={handleExport}>
-					<FiDownload className="h-4 w-4" /> Export Directory
+					<FiDownload className="h-4 w-4" /> Export Report
 				</button>
 			)}
 		>

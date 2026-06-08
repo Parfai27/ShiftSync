@@ -108,7 +108,7 @@ function complianceStatusClasses(status, danger) {
 
 export default function Reports() {
 	const navigate = useNavigate()
-	const { manager, workspace, isLoading, error } = useManagerWorkspace()
+	const { manager, workspace, session, isLoading, error } = useManagerWorkspace()
 	const profileImage = resolveProfileImage(manager?.profileImageUrl, manager?.fullName)
 	const reports = workspace.reports
 	const [searchTerm, setSearchTerm] = useState('')
@@ -118,8 +118,10 @@ export default function Reports() {
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 	const [showExportModal, setShowExportModal] = useState(false)
 	const [exportType, setExportType] = useState('executive-summary')
-	const [exportFormat, setExportFormat] = useState('csv')
+	const [exportFormat, setExportFormat] = useState('html')
 	const [exportScope, setExportScope] = useState('full')
+	const [exportDateRange, setExportDateRange] = useState({ from: '', to: '' })
+	const [exportDateRangeError, setExportDateRangeError] = useState('')
 	const [exportError, setExportError] = useState('')
 	const [isExporting, setIsExporting] = useState(false)
 
@@ -152,6 +154,7 @@ export default function Reports() {
 				row.date,
 				row.department,
 				row.punchIn,
+				row.punchOut,
 				row.status,
 			].join(' ').toLowerCase().includes(normalizedSearch)
 
@@ -192,20 +195,35 @@ export default function Reports() {
 
 	function openExportModal() {
 		setExportError('')
+		setExportDateRangeError('')
+		setExportDateRange({ from: '', to: '' })
 		setShowExportModal(true)
 	}
 
 	async function handleConfirmReportExport() {
 		try {
+			if (!exportDateRange.from || !exportDateRange.to) {
+				setExportDateRangeError('Please choose both start and end dates before exporting.')
+				setExportError('')
+				return
+			}
+			if (new Date(exportDateRange.from) > new Date(exportDateRange.to)) {
+				setExportDateRangeError('The start date must be on or before the end date.')
+				setExportError('')
+				return
+			}
 			setIsExporting(true)
 			setExportError('')
-			const summary = executeReportExport({
+			setExportDateRangeError('')
+			const summary = await executeReportExport({
 				type: exportType,
 				format: exportFormat,
 				reports,
 				manager,
+				session,
 				searchTerm,
 				scope: exportType === 'compliance-log' ? exportScope : 'full',
+				dateRange: exportDateRange,
 			})
 			setShowExportModal(false)
 			setExportLabel(summary)
@@ -416,13 +434,14 @@ export default function Reports() {
 												<th className="px-5 py-4">Shift Date</th>
 												<th className="px-5 py-4">Department</th>
 												<th className="px-5 py-4">Punch In</th>
+												<th className="px-5 py-4">Punch Out</th>
 												<th className="px-5 py-4">Status</th>
 												<th className="px-5 py-4 text-right">Actions</th>
 											</tr>
 										</thead>
 										<tbody>
 											{visibleCompliance.map((row) => (
-												<tr key={`${row.id}-${row.date}-${row.punchIn}`} className="border-b border-slate-200 last:border-b-0">
+												<tr key={`${row.id}-${row.date}-${row.punchIn}-${row.punchOut}`} className="border-b border-slate-200 last:border-b-0">
 													<td className="px-5 py-4">
 														<div className="flex items-center gap-3">
 															<div className="flex h-11 w-11 items-center justify-center rounded-full bg-[linear-gradient(135deg,#2563eb,#3b82f6)] text-[12px] font-black text-white">{row.initials}</div>
@@ -435,6 +454,7 @@ export default function Reports() {
 													<td className="px-5 py-4 text-sm text-slate-700">{row.date}</td>
 													<td className="px-5 py-4 text-sm text-slate-600">{row.department}</td>
 													<td className="px-5 py-4 text-sm font-semibold text-slate-950">{row.punchIn}</td>
+													<td className="px-5 py-4 text-sm font-semibold text-slate-950">{row.punchOut}</td>
 													<td className="px-5 py-4">
 														<span className={`inline-flex rounded-full px-3 py-1 text-xs font-extrabold uppercase tracking-[0.14em] ${complianceStatusClasses(row.status, row.danger)}`}>
 															{row.status}
@@ -469,6 +489,7 @@ export default function Reports() {
 							<div><span className="font-bold text-slate-900">Shift Date:</span> {selectedLog.date}</div>
 							<div><span className="font-bold text-slate-900">Department:</span> {selectedLog.department}</div>
 							<div><span className="font-bold text-slate-900">Punch In:</span> {selectedLog.punchIn}</div>
+							<div><span className="font-bold text-slate-900">Punch Out:</span> {selectedLog.punchOut}</div>
 							<div><span className="font-bold text-slate-900">Status:</span> {selectedLog.status}</div>
 						</div>
 						<div className="mt-5 flex flex-wrap justify-end gap-3">
@@ -481,20 +502,23 @@ export default function Reports() {
 			{showExportModal ? (
 				<ExportPickerModal
 					title="Export Weekly Reports"
-					subtitle="Pick the analysis you need, then download a structured CSV or JSON file."
+					subtitle="Pick the analysis you need, then download a branded printable report."
 					options={REPORT_EXPORT_OPTIONS}
 					selectedId={exportType}
 					onSelect={(nextType) => {
 						setExportType(nextType)
 						const nextOption = REPORT_EXPORT_OPTIONS.find((option) => option.id === nextType)
-						if (nextOption?.formats?.length === 1 && nextOption.formats[0] === 'csv') {
-							setExportFormat('csv')
+						if (nextOption?.formats?.length === 1) {
+							setExportFormat(nextOption.formats[0])
 						}
 					}}
 					format={exportFormat}
 					onFormatChange={setExportFormat}
 					scope={exportScope}
 					onScopeChange={setExportScope}
+					dateRange={exportDateRange}
+					onDateRangeChange={setExportDateRange}
+					dateRangeError={exportDateRangeError}
 					scopeOptions={
 						exportType === 'compliance-log'
 							? [
@@ -509,6 +533,7 @@ export default function Reports() {
 					onClose={() => {
 						setShowExportModal(false)
 						setExportError('')
+						setExportDateRangeError('')
 					}}
 					onExport={handleConfirmReportExport}
 				/>

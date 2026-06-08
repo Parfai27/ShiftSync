@@ -43,11 +43,11 @@ public class SystemSetting extends BaseEntity {
     @Builder.Default
     private boolean notifyManagersOnUrgentChanges = true;
 
-    @Column(nullable = false)
+    @Column
     @Builder.Default
     private String aiBaseUrl = "https://api.openai.com/v1";
 
-    @Column(nullable = false)
+    @Column
     @Builder.Default
     private String aiModel = "gpt-4o-mini";
 }

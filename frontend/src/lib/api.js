@@ -20,6 +20,9 @@ export async function apiRequest(path, options = {}) {
 
 	if (response.status === 401) {
 		clearSession()
+		if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+			window.location.replace('/login?expired=1')
+		}
 		throw new Error('Your session has expired. Please sign in again.')
 	}
 

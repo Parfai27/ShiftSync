@@ -80,7 +80,9 @@ export default function Profiles() {
 	const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false)
 	const [showExportModal, setShowExportModal] = useState(false)
 	const [exportType, setExportType] = useState('roster')
-	const [exportFormat, setExportFormat] = useState('csv')
+	const [exportFormat, setExportFormat] = useState('html')
+	const [exportDateRange, setExportDateRange] = useState({ from: '', to: '' })
+	const [exportDateRangeError, setExportDateRangeError] = useState('')
 	const [exportError, setExportError] = useState('')
 	const [isExporting, setIsExporting] = useState(false)
 	const [actionError, setActionError] = useState('')
@@ -364,8 +366,10 @@ export default function Profiles() {
 
 	function handleExportCsv() {
 		setExportError('')
+		setExportDateRangeError('')
 		setExportType(featured?.userId ? 'profile-dossier' : 'roster')
-		setExportFormat('csv')
+		setExportFormat('html')
+		setExportDateRange({ from: '', to: '' })
 		setShowExportModal(true)
 	}
 
@@ -390,16 +394,29 @@ export default function Profiles() {
 
 	async function handleConfirmExport() {
 		try {
+			if (!exportDateRange.from || !exportDateRange.to) {
+				setExportDateRangeError('Please choose both start and end dates before exporting.')
+				setExportError('')
+				return
+			}
+			if (new Date(exportDateRange.from) > new Date(exportDateRange.to)) {
+				setExportDateRangeError('The start date must be on or before the end date.')
+				setExportError('')
+				return
+			}
 			setIsExporting(true)
 			setExportError('')
-			const summary = executeProfileExport({
+			setExportDateRangeError('')
+			const summary = await executeProfileExport({
 				type: exportType,
 				format: exportFormat,
 				roster: filteredRoster,
 				featured,
 				manager,
+				session,
 				rosterFilter,
 				searchTerm,
+				dateRange: exportDateRange,
 			})
 			setShowExportModal(false)
 			setActionMessage(summary)
@@ -759,7 +776,7 @@ export default function Profiles() {
 													</div>
 												</div>
 												<div className="flex items-center gap-2 text-slate-500">
-													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-[#0f51ff]/30 hover:bg-[#eef3ff] hover:text-[#0f51ff]" onClick={handleExportCsv} title="Export profile" type="button"><FiDownload className="h-4 w-4" /></button>
+													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-[#0f51ff]/30 hover:bg-[#eef3ff] hover:text-[#0f51ff]" onClick={handleExportCsv} title="Export report" type="button"><FiDownload className="h-4 w-4" /></button>
 													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40" disabled={isInactiveEmployee || detailBusy} onClick={() => setIsEditing((current) => !current)} type="button"><FiEdit2 className="h-4 w-4" /></button>
 													<button className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-slate-100" onClick={() => window.location.assign(`mailto:${featured.email}`)} type="button"><FiMail className="h-4 w-4" /></button>
 												</div>
@@ -863,12 +880,15 @@ export default function Profiles() {
 			{showExportModal ? (
 				<ExportPickerModal
 					title="Export Employee Data"
-					subtitle="Choose what to download from the pharmacy workforce directory."
+					subtitle="Choose what to download from the pharmacy workforce directory as a branded printable report."
 					options={PROFILE_EXPORT_OPTIONS}
 					selectedId={exportType}
 					onSelect={setExportType}
 					format={exportFormat}
 					onFormatChange={setExportFormat}
+					dateRange={exportDateRange}
+					onDateRangeChange={setExportDateRange}
+					dateRangeError={exportDateRangeError}
 					previewLines={profileExportPreview}
 					disabledOptionIds={disabledProfileExports}
 					isExporting={isExporting}
@@ -876,6 +896,7 @@ export default function Profiles() {
 					onClose={() => {
 						setShowExportModal(false)
 						setExportError('')
+						setExportDateRangeError('')
 					}}
 					onExport={handleConfirmExport}
 				/>

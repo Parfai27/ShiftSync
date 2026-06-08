@@ -32,28 +32,6 @@ function SyncBotIcon({ className = '' }) {
 	)
 }
 
-function buildStorageKey(userId, role) {
-	return `shiftsync-chat-history:${userId || 'guest'}:${role || 'guest'}`
-}
-
-function loadStoredMessages(storageKey) {
-	if (typeof window === 'undefined') {
-		return [buildWelcomeMessage()]
-	}
-
-	try {
-		const raw = window.localStorage.getItem(storageKey)
-		if (!raw) {
-			return [buildWelcomeMessage()]
-		}
-
-		const parsed = JSON.parse(raw)
-		return Array.isArray(parsed) && parsed.length ? parsed : [buildWelcomeMessage()]
-	} catch {
-		return [buildWelcomeMessage()]
-	}
-}
-
 function trimMessages(messages) {
 	const welcome = messages[0]?.author === 'assistant' ? [messages[0]] : []
 	const body = welcome.length ? messages.slice(1) : messages
@@ -76,25 +54,20 @@ export default function ShiftSyncAssistant() {
 	const session = loadSession()
 	const role = session?.role || 'GUEST'
 	const displayName = session?.fullName || session?.name || 'there'
-	const storageKey = buildStorageKey(session?.userId, role)
 	const [isOpen, setIsOpen] = useState(false)
 	const [query, setQuery] = useState('')
-	const [messages, setMessages] = useState(() => loadStoredMessages(storageKey))
+	const [messages, setMessages] = useState(() => [buildWelcomeMessage()])
 	const [isThinking, setIsThinking] = useState(false)
 	const bodyRef = useRef(null)
 	const contextualHelp = getContextualHelp(location.pathname, role)
 
 	useEffect(() => {
-		setMessages(loadStoredMessages(storageKey))
-	}, [storageKey])
-
-	useEffect(() => {
-		if (typeof window === 'undefined') {
-			return
+		if (isOpen) {
+			setMessages([buildWelcomeMessage()])
+			setQuery('')
+			setIsThinking(false)
 		}
-
-		window.localStorage.setItem(storageKey, JSON.stringify(trimMessages(messages)))
-	}, [messages, storageKey])
+	}, [isOpen])
 
 	useEffect(() => {
 		if (!isOpen || !bodyRef.current) {

@@ -28,9 +28,13 @@ export default function EmployeeNotificationBell({ unreadCount, userId, to = '/e
 		}
 
 		loadUnreadCount()
+		const intervalId = window.setInterval(() => {
+			void loadUnreadCount()
+		}, 3000)
 
 		return () => {
 			cancelled = true
+			window.clearInterval(intervalId)
 		}
 	}, [unreadCount, userId])
 

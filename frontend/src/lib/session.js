@@ -76,6 +76,10 @@ export function clearSession() {
 	sessionStorage.removeItem(SESSION_STORAGE_KEY)
 }
 
+export function hasStoredSessionData() {
+	return Boolean(localStorage.getItem(LOCAL_SESSION_KEY) || sessionStorage.getItem(SESSION_STORAGE_KEY))
+}
+
 export function isSessionExpired(session = loadSession()) {
 	if (!session?.expiresAt) {
 		return true

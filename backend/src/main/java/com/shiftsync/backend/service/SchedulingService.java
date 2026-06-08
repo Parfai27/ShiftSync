@@ -40,10 +40,13 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 @RequiredArgsConstructor
@@ -204,7 +207,7 @@ public class SchedulingService {
             .orElseThrow(() -> new IllegalArgumentException("No available employee could be assigned to the next open shift"));
 
         assignEmployeeToShift(manager, employee, shift, "Assigned available staff to understaffed shift");
-        sendWeeklyAssignmentSummaryIfAvailable(employee, shift.getShiftDate());
+        queueWeeklyAssignmentSummary(employee, shift.getShiftDate());
         return shiftRepository.save(shift);
     }
 
@@ -229,7 +232,7 @@ public class SchedulingService {
             shiftRepository.save(shift);
         }
 
-        sendWeeklyAssignmentSummariesForBranch(manager, openShifts);
+        queueWeeklyAssignmentSummariesForBranch(manager, openShifts);
 
         logAudit(manager, "Ran auto schedule", "Scheduling", "Auto scheduling processed " + openShifts.size() + " shift(s).");
         return openShifts;
@@ -244,12 +247,7 @@ public class SchedulingService {
         validateManagedEmployee(manager, employee);
         Shift shift = findManagedShift(manager, request.shiftDate(), request.shiftName());
 
-        if (isEmployeeAssignedToShift(employee.getId(), shift.getId())) {
-            throw new IllegalArgumentException("Employee is already assigned to this shift");
-        }
-        if (hasSameDayAssignment(employee.getId(), shift.getShiftDate())) {
-            throw new IllegalArgumentException("Employee already has a shift on this day");
-        }
+        validateAssignableShift(employee, shift);
 
         String employeeRole = resolveShiftRole(employee);
         if (employeeRole == null || !REQUIRED_SHIFT_ROLES.contains(employeeRole)) {
@@ -265,7 +263,7 @@ public class SchedulingService {
         }
 
         assignEmployeeToShift(manager, employee, shift, "Assigned employee manually to selected shift");
-        sendWeeklyAssignmentSummaryIfAvailable(employee, shift.getShiftDate());
+        queueWeeklyAssignmentSummary(employee, shift.getShiftDate());
         return shiftRepository.save(shift);
     }
 
@@ -303,7 +301,7 @@ public class SchedulingService {
             "Scheduling",
             employee.getFullName() + " removed from " + shift.getName() + " on " + shift.getShiftDate() + "."
         );
-        sendWeeklyAssignmentSummaryIfAvailable(employee, shift.getShiftDate());
+        queueWeeklyAssignmentSummary(employee, shift.getShiftDate());
         return shift;
     }
 
@@ -373,8 +371,8 @@ public class SchedulingService {
             "Scheduling",
             "Moved " + shift.getName() + " on " + shift.getShiftDate() + " from " + currentEmployee.getFullName() + " to " + replacementEmployee.getFullName() + "."
         );
-        sendWeeklyAssignmentSummaryIfAvailable(currentEmployee, shift.getShiftDate());
-        sendWeeklyAssignmentSummaryIfAvailable(replacementEmployee, shift.getShiftDate());
+        queueWeeklyAssignmentSummary(currentEmployee, shift.getShiftDate());
+        queueWeeklyAssignmentSummary(replacementEmployee, shift.getShiftDate());
         return shift;
     }
 
@@ -458,6 +456,7 @@ public class SchedulingService {
     }
 
     private void assignEmployeeToShift(User manager, User employee, Shift shift, String action) {
+        validateAssignableShift(employee, shift);
         ShiftAssignment assignment = ShiftAssignment.builder()
             .shift(shift)
             .employee(employee)
@@ -479,6 +478,37 @@ public class SchedulingService {
         );
 
         logAudit(manager, action, "Scheduling", employee.getFullName() + " assigned to " + shift.getName() + " on " + shift.getShiftDate() + ".");
+    }
+
+    private void validateAssignableShift(User employee, Shift shift) {
+        if (shift.getShiftDate().isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("Cannot assign shifts on past dates");
+        }
+        if (isEmployeeAssignedToShift(employee.getId(), shift.getId())) {
+            throw new IllegalArgumentException("Employee is already assigned to this shift");
+        }
+        if (hasSameDayAssignment(employee.getId(), shift.getShiftDate())) {
+            throw new IllegalArgumentException("Employee already has a shift on this day");
+        }
+    }
+
+    private void queueWeeklyAssignmentSummary(User employee, LocalDate referenceDate) {
+        if (employee == null || employee.getEmail() == null || employee.getEmail().isBlank()) {
+            return;
+        }
+
+        Runnable task = () -> sendWeeklyAssignmentSummaryIfAvailable(employee, referenceDate);
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    CompletableFuture.runAsync(task);
+                }
+            });
+            return;
+        }
+
+        CompletableFuture.runAsync(task);
     }
 
     private void sendWeeklyAssignmentSummariesForBranch(User manager, List<Shift> shifts) {
@@ -503,6 +533,25 @@ public class SchedulingService {
         for (User employee : branchEmployeesWithAssignments) {
             sendWeeklyAssignmentSummaryIfAvailable(employee, weekReference);
         }
+    }
+
+    private void queueWeeklyAssignmentSummariesForBranch(User manager, List<Shift> shifts) {
+        if (shifts == null || shifts.isEmpty()) {
+            return;
+        }
+
+        Runnable task = () -> sendWeeklyAssignmentSummariesForBranch(manager, shifts);
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    CompletableFuture.runAsync(task);
+                }
+            });
+            return;
+        }
+
+        CompletableFuture.runAsync(task);
     }
 
     private void sendWeeklyAssignmentSummaryIfAvailable(User employee, LocalDate referenceDate) {
@@ -533,15 +582,7 @@ public class SchedulingService {
             return;
         }
 
-        notificationRepository.save(
-            Notification.builder()
-                .title("Weekly shift summary sent")
-                .message("Your weekly shift assignment summary was emailed for the week of " + weekStart + ".")
-                .priority(NotificationPriority.MEDIUM)
-                .recipient(employee)
-                .read(false)
-                .build()
-        );
+        return;
     }
 
     private boolean isWithinScheduleWeek(LocalDate shiftDate, LocalDate referenceDate) {
@@ -625,7 +666,6 @@ public class SchedulingService {
 
     private List<ShiftTemplate> getWeeklyTemplates() {
         return List.of(
-            new ShiftTemplate("Evening Shift", LocalTime.of(23, 0), LocalTime.of(7, 0)),
             new ShiftTemplate("1st Shift", LocalTime.of(7, 0), LocalTime.of(15, 0)),
             new ShiftTemplate("2nd Shift", LocalTime.of(15, 0), LocalTime.of(23, 0))
         );

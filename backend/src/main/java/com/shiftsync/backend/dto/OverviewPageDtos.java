@@ -44,7 +44,10 @@ public final class OverviewPageDtos {
         Long shiftId,
         String shiftName,
         String shiftDate,
-        String shiftWindow
+        String shiftWindow,
+        String clockedInAt,
+        String clockedOutAt,
+        String attendanceState
     ) {
     }
 
@@ -57,12 +60,19 @@ public final class OverviewPageDtos {
     public record EmployeeShiftAdjustmentItem(
         Long requestId,
         Long shiftId,
+        String shiftDate,
+        String shiftName,
+        String shiftWindow,
         String shiftLabel,
         String adjustmentType,
         String reason,
         String status,
         String targetEmployeeName,
-        String targetEmployeeResponse
+        String targetEmployeeResponse,
+        Long targetShiftId,
+        String targetShiftDate,
+        String targetShiftName,
+        String targetShiftWindow
     ) {
     }
 

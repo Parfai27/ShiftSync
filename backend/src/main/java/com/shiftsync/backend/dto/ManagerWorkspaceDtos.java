@@ -158,10 +158,14 @@ public final class ManagerWorkspaceDtos {
         Long id,
         String name,
         String requested,
+        String shiftDate,
+        String shiftName,
+        String shiftWindow,
         String from,
         String fromShift,
         String to,
         String toShift,
+        String targetEmployeeResponse,
         String reason,
         String status
     ) {
@@ -297,6 +301,7 @@ public final class ManagerWorkspaceDtos {
         String date,
         String department,
         String punchIn,
+        String punchOut,
         String status,
         boolean danger
     ) {

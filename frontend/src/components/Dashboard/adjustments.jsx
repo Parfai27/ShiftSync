@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import {
 	FiAlertTriangle,
 	FiBell,
@@ -34,16 +34,20 @@ function MetricCard({ label, value }) {
 }
 
 function peerResponseBadgeClasses(value) {
-	if (value.includes('PEER RESPONSE: ACCEPTED')) {
+	if (value.includes('ACCEPTED')) {
 		return 'bg-[#e8eeff] text-[#0f51ff]'
 	}
-	if (value.includes('PEER RESPONSE: REJECTED')) {
+	if (value.includes('REJECTED')) {
 		return 'bg-rose-100 text-rose-700'
 	}
-	if (value.includes('PEER RESPONSE: PENDING')) {
+	if (value.includes('PENDING')) {
 		return 'bg-amber-100 text-amber-700'
 	}
 	return 'bg-slate-100 text-slate-600'
+}
+
+function normalizePeerResponse(value) {
+	return (value || 'NOT_REQUIRED').toUpperCase()
 }
 
 export default function Adjustments() {
@@ -61,13 +65,13 @@ export default function Adjustments() {
 	const [swapTriageFilter, setSwapTriageFilter] = useState('ALL')
 
 	const normalizedSearch = searchTerm.trim().toLowerCase()
-	const waitingOnPeerCount = adjustments.requests.filter((request) => request.requested.toLowerCase().includes('shift swap') && request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')).length
-	const readyForManagerCount = adjustments.requests.filter((request) => request.requested.toLowerCase().includes('shift swap') && request.toShift.toUpperCase().includes('PEER RESPONSE: ACCEPTED')).length
+	const waitingOnPeerCount = adjustments.requests.filter((request) => request.requested.toLowerCase().includes('shift swap') && request.targetEmployeeResponse === 'PENDING').length
+	const readyForManagerCount = adjustments.requests.filter((request) => request.requested.toLowerCase().includes('shift swap') && request.targetEmployeeResponse === 'ACCEPTED').length
 	const visibleRequests = useMemo(() => {
 		return adjustments.requests.filter((request) => {
 			const isSwapRequest = request.requested.toLowerCase().includes('shift swap')
-			const isWaitingOnPeer = isSwapRequest && request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')
-			const isReadyForManager = isSwapRequest && request.toShift.toUpperCase().includes('PEER RESPONSE: ACCEPTED')
+			const isWaitingOnPeer = isSwapRequest && request.targetEmployeeResponse === 'PENDING'
+			const isReadyForManager = isSwapRequest && request.targetEmployeeResponse === 'ACCEPTED'
 
 			const matchesSwapTriage =
 				swapTriageFilter === 'ALL' ||
@@ -99,7 +103,7 @@ export default function Adjustments() {
 	}, [adjustments.requests, normalizedSearch, swapTriageFilter])
 
 	const pendingVisibleRequests = visibleRequests.filter((request) => request.status === 'PENDING')
-	const bulkApprovableRequests = pendingVisibleRequests.filter((request) => !request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING'))
+	const bulkApprovableRequests = pendingVisibleRequests.filter((request) => request.targetEmployeeResponse !== 'PENDING')
 
 	async function handleDecision(requestId, status) {
 		try {
@@ -274,19 +278,19 @@ export default function Adjustments() {
 													<div className="flex flex-wrap items-center gap-3">
 														<div className="flex items-center -space-x-2">
 															<div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white bg-[#0f51ff] text-sm font-black text-white">{request.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</div>
-															<div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-sm font-black text-white">↔</div>
+                                                            <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-sm font-black text-white">↔</div>
 															<div className={`flex h-12 w-12 items-center justify-center rounded-full border-2 border-white text-xs font-black text-white ${request.status === 'APPROVED' ? 'bg-emerald-600' : request.status === 'REJECTED' ? 'bg-rose-600' : 'bg-amber-500'}`}>{request.status.slice(0, 2)}</div>
 														</div>
 														<div>
 															<div className="text-xl font-black tracking-[-0.04em] text-slate-950">{request.name}</div>
 															<div className="text-sm text-slate-500">{request.requested}</div>
 															{request.requested.toLowerCase().includes('shift swap') ? (
-																<div className={`mt-2 inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] ${peerResponseBadgeClasses(request.toShift.toUpperCase())}`}>
-																	{request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')
+																<div className={`mt-2 inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] ${peerResponseBadgeClasses(normalizePeerResponse(request.targetEmployeeResponse))}`}>
+																	{normalizePeerResponse(request.targetEmployeeResponse).includes('PENDING')
 																		? 'Waiting on peer response'
-																		: request.toShift.toUpperCase().includes('PEER RESPONSE: ACCEPTED')
+																		: normalizePeerResponse(request.targetEmployeeResponse).includes('ACCEPTED')
 																			? 'Peer approved'
-																			: request.toShift.toUpperCase().includes('PEER RESPONSE: REJECTED')
+																			: normalizePeerResponse(request.targetEmployeeResponse).includes('REJECTED')
 																				? 'Peer rejected'
 																			: 'Peer response recorded'}
 																</div>
@@ -322,7 +326,7 @@ export default function Adjustments() {
 														</label>
 														<div className="flex gap-3 sm:flex-col">
 															<button
-																disabled={activeRequestId === request.id || request.status !== 'PENDING' || request.toShift.toUpperCase().includes('PEER RESPONSE: PENDING')}
+																disabled={activeRequestId === request.id || request.status !== 'PENDING' || normalizePeerResponse(request.targetEmployeeResponse).includes('PENDING')}
 																onClick={() => handleDecision(request.id, 'APPROVED')}
 																className="rounded-xl bg-[#0f51ff] px-6 py-3 text-sm font-extrabold text-white hover:bg-[#0b44de] disabled:cursor-not-allowed disabled:opacity-60"
 																type="button"

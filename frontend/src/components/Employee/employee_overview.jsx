@@ -68,7 +68,6 @@ export default function EmployeeOverview() {
 	const [searchTerm, setSearchTerm] = useState('')
 	const [scheduleView, setScheduleView] = useState('WEEK')
 	const [actionMessage, setActionMessage] = useState('')
-	const [isRequestingTimeOff, setIsRequestingTimeOff] = useState(false)
 	const [isMessagingManager, setIsMessagingManager] = useState(false)
 	const [isMarkingNotificationsRead, setIsMarkingNotificationsRead] = useState(false)
 	const [timeLabel, setTimeLabel] = useState(resolveGreetingLabel())
@@ -95,9 +94,13 @@ export default function EmployeeOverview() {
 		}
 
 		loadOverview()
+		const intervalId = window.setInterval(() => {
+			void loadOverview()
+		}, 3000)
 
 		return () => {
 			cancelled = true
+			window.clearInterval(intervalId)
 		}
 	}, [session?.userId])
 
@@ -155,20 +158,9 @@ export default function EmployeeOverview() {
 			setError('No employee session found. Please log in again.')
 			return
 		}
-		try {
-			setError('')
-			setActionMessage('')
-			setIsRequestingTimeOff(true)
-			await apiRequest(`/api/employee/time-off/${session.userId}`, {
-				method: 'POST',
-				body: JSON.stringify({ note: 'Requested from employee overview quick action' }),
-			})
-			setActionMessage('Time-off request sent to your manager successfully.')
-		} catch (requestError) {
-			setError(requestError.message || 'Unable to submit your time-off request.')
-		} finally {
-			setIsRequestingTimeOff(false)
-		}
+		setError('')
+		setActionMessage('Open Shift Adjustments to submit your time-off request.')
+		navigate('/employee-schedule#adjustments')
 	}
 
 	async function messageManager() {
@@ -282,7 +274,7 @@ export default function EmployeeOverview() {
 								</div>
 								<div className="flex flex-wrap items-center gap-2">
 									<button className="rounded-xl bg-[#e8eeff] px-5 py-2.5 text-xs font-bold text-[#2542ad] transition hover:bg-[#dbe6ff]" onClick={() => navigate('/employee-schedule')} type="button">View Full History</button>
-									<button className="rounded-xl bg-[#0f51ff] px-5 py-2.5 text-xs font-bold text-white transition hover:bg-[#0b44de] disabled:cursor-not-allowed disabled:opacity-60" disabled={isRequestingTimeOff} onClick={requestTimeOff} type="button">{isRequestingTimeOff ? 'Submitting...' : 'Request Time Off'}</button>
+									<button className="rounded-xl bg-[#0f51ff] px-5 py-2.5 text-xs font-bold text-white transition hover:bg-[#0b44de]" onClick={requestTimeOff} type="button">Request Time Off</button>
 								</div>
 							</div>
 
@@ -318,15 +310,18 @@ export default function EmployeeOverview() {
 							)}
 						</section>
 
-						{hasAssignedDashboardData ? <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)]">
-							<article className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5">
-								<div className="flex flex-wrap items-center justify-between gap-3">
-									<h2 className="text-[28px] font-black tracking-[-0.05em] text-slate-950">My Schedule</h2>
-									<div className="inline-flex rounded-xl bg-[#eef2ff] p-1 text-xs font-semibold text-slate-500">
-										<button className={`rounded-lg px-3 py-1.5 ${scheduleView === 'WEEK' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setScheduleView('WEEK')} type="button">Week</button>
-										<button className={`rounded-lg px-3 py-1.5 ${scheduleView === 'MONTH' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setScheduleView('MONTH')} type="button">Month</button>
+							{hasAssignedDashboardData ? <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)]">
+								<article className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5">
+									<div className="flex flex-wrap items-center justify-between gap-3">
+										<div>
+											<h2 className="text-[28px] font-black tracking-[-0.05em] text-slate-950">Weekly Shift Roster</h2>
+											<p className="mt-1 text-sm text-slate-500">Your live shift allocation across the current week, updated automatically when the roster changes.</p>
+										</div>
+										<div className="inline-flex rounded-xl bg-[#eef2ff] p-1 text-xs font-semibold text-slate-500">
+											<button className={`rounded-lg px-3 py-1.5 ${scheduleView === 'WEEK' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setScheduleView('WEEK')} type="button">Week</button>
+											<button className={`rounded-lg px-3 py-1.5 ${scheduleView === 'MONTH' ? 'bg-white text-[#0f51ff]' : ''}`} onClick={() => setScheduleView('MONTH')} type="button">Month</button>
+										</div>
 									</div>
-								</div>
 
 								<div className="mt-4 rounded-2xl bg-[#f3f6ff] p-3">
 									<div className="grid grid-cols-7 gap-2 text-center">
@@ -358,7 +353,7 @@ export default function EmployeeOverview() {
 										))}
 										{!visibleSchedule.length ? <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-500">No schedule items matched your search.</div> : null}
 
-										<button className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-600 transition hover:border-[#0f51ff] hover:text-[#0f51ff]" onClick={() => navigate('/employee-schedule')} type="button">+ Find Open Shifts</button>
+										<button className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-600 transition hover:border-[#0f51ff] hover:text-[#0f51ff]" onClick={() => navigate('/employee-schedule')} type="button">+ Open Shift Board</button>
 									</div>
 								</div>
 							</article>

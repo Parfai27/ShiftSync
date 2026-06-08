@@ -2,6 +2,12 @@ import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { FiCheck, FiDownload, FiFileText, FiX } from 'react-icons/fi'
 
+const FORMAT_LABELS = {
+	html: 'Printable Report',
+	csv: 'CSV',
+	json: 'JSON',
+}
+
 function FormatBadge({ label, active, onClick }) {
 	return (
 		<button
@@ -26,10 +32,13 @@ export default function ExportPickerModal({
 	onSelect,
 	format,
 	onFormatChange,
-	availableFormats = ['csv', 'json'],
+	availableFormats = ['html'],
 	scope,
 	onScopeChange,
 	scopeOptions,
+	dateRange,
+	onDateRangeChange,
+	dateRangeError = '',
 	previewLines = [],
 	disabledOptionIds = [],
 	isExporting = false,
@@ -159,6 +168,36 @@ export default function ExportPickerModal({
 						</section>
 					) : null}
 
+					{onDateRangeChange ? (
+						<section className="mt-6">
+							<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Date range</div>
+							<div className="mt-3 grid gap-3 sm:grid-cols-2">
+								<label className="grid gap-2 text-sm font-bold text-slate-700">
+									<span>From</span>
+									<input
+										className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-[#0f51ff]"
+										max={dateRange?.to || undefined}
+										onChange={(event) => onDateRangeChange((current) => ({ ...current, from: event.target.value }))}
+										type="date"
+										value={dateRange?.from || ''}
+									/>
+								</label>
+								<label className="grid gap-2 text-sm font-bold text-slate-700">
+									<span>To</span>
+									<input
+										className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-[#0f51ff]"
+										min={dateRange?.from || undefined}
+										onChange={(event) => onDateRangeChange((current) => ({ ...current, to: event.target.value }))}
+										type="date"
+										value={dateRange?.to || ''}
+									/>
+								</label>
+							</div>
+							<p className="mt-2 text-xs leading-5 text-slate-500">Choose a valid date range before downloading the report.</p>
+							{dateRangeError ? <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{dateRangeError}</div> : null}
+						</section>
+					) : null}
+
 					<section className="mt-6">
 						<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">File format</div>
 						<div className="mt-3 flex flex-wrap gap-2">
@@ -166,7 +205,7 @@ export default function ExportPickerModal({
 								<FormatBadge
 									key={option}
 									active={format === option}
-									label={option}
+									label={FORMAT_LABELS[option] || option.toUpperCase()}
 									onClick={() => onFormatChange(option)}
 								/>
 							))}

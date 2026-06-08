@@ -15,7 +15,10 @@ import com.shiftsync.backend.repository.UserRepository;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -79,7 +82,14 @@ public class DashboardService {
         );
 
         List<ShiftStatusCard> shiftStatuses = branchShifts.stream()
-            .limit(3)
+            .collect(Collectors.toMap(
+                Shift::getName,
+                Function.identity(),
+                (left, right) -> left.getShiftDate().isBefore(right.getShiftDate()) ? left : right,
+                LinkedHashMap::new
+            ))
+            .values()
+            .stream()
             .map(shift -> new ShiftStatusCard(
                 shift.getName(),
                 shift.getStartTime().format(SHIFT_TIME) + " - " + shift.getEndTime().format(SHIFT_TIME),

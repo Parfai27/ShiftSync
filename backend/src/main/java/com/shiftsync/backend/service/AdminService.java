@@ -179,8 +179,8 @@ public class AdminService {
         boolean mailConfigured = hasText(environment.getProperty("app.mail.username")) && hasText(environment.getProperty("app.mail.host"));
         boolean aiConfigured = hasText(environment.getProperty("app.ai.api-key"));
         SystemSetting systemSetting = getOrCreateSystemSetting();
-        String aiBaseUrl = systemSetting.getAiBaseUrl();
-        String aiModel = systemSetting.getAiModel();
+        String aiBaseUrl = normalizeAiBaseUrl(systemSetting.getAiBaseUrl());
+        String aiModel = normalizeAiModel(systemSetting.getAiModel());
 
         List<AdminIntegrationMetric> metrics = List.of(
             new AdminIntegrationMetric("Audit Records", String.valueOf(auditLogRepository.count()), "Immutable operational history"),
@@ -497,7 +497,7 @@ public class AdminService {
     }
 
     private SystemSetting getOrCreateSystemSetting() {
-        return systemSettingRepository.findBySettingKey("PRIMARY")
+        SystemSetting settings = systemSettingRepository.findBySettingKey("PRIMARY")
             .orElseGet(() -> systemSettingRepository.save(
                 SystemSetting.builder()
                     .settingKey("PRIMARY")
@@ -511,6 +511,29 @@ public class AdminService {
                     .aiModel(environment.getProperty("app.ai.model", "gpt-4o-mini"))
                     .build()
             ));
+
+        boolean dirty = false;
+        if (!hasText(settings.getAiBaseUrl())) {
+            settings.setAiBaseUrl(environment.getProperty("app.ai.base-url", "https://api.openai.com/v1"));
+            dirty = true;
+        }
+        if (!hasText(settings.getAiModel())) {
+            settings.setAiModel(environment.getProperty("app.ai.model", "gpt-4o-mini"));
+            dirty = true;
+        }
+        if (dirty) {
+            settings = systemSettingRepository.save(settings);
+        }
+
+        return settings;
+    }
+
+    private String normalizeAiBaseUrl(String value) {
+        return hasText(value) ? value.trim() : environment.getProperty("app.ai.base-url", "https://api.openai.com/v1");
+    }
+
+    private String normalizeAiModel(String value) {
+        return hasText(value) ? value.trim() : environment.getProperty("app.ai.model", "gpt-4o-mini");
     }
 
     private User resolveActor(Long actorUserId) {

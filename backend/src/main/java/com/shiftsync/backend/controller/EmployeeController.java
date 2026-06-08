@@ -107,6 +107,24 @@ public class EmployeeController {
         employeeOverviewService.requestEmployeeTimeOff(userId, payload == null ? null : payload.get("note"));
     }
 
+    @PostMapping("/attendance/{userId}/{shiftId}/clock-in")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void clockInShift(
+        @PathVariable Long userId,
+        @PathVariable Long shiftId
+    ) {
+        employeeOverviewService.clockInShift(userId, shiftId);
+    }
+
+    @PostMapping("/attendance/{userId}/{shiftId}/clock-out")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void clockOutShift(
+        @PathVariable Long userId,
+        @PathVariable Long shiftId
+    ) {
+        employeeOverviewService.clockOutShift(userId, shiftId);
+    }
+
     @PostMapping("/contact-manager/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void contactManager(

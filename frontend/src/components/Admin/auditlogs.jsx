@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { FiAlertTriangle, FiDownload, FiShield } from 'react-icons/fi'
 import AdminFrame from './AdminFrame.jsx'
 import { getAdminAuditLogsWorkspace } from '../../lib/adminWorkspace'
-import { downloadCsv } from '../../lib/export'
+import { buildBrandedReportDocument, buildDatedFilename, downloadBrandedReport, formatExportDate, requestExportDateRange, resolveShiftSyncLogoDataUrl } from '../../lib/export'
+import { loadSession } from '../../lib/session'
 
 const fallbackData = {
 	totalLogs: 0,
@@ -13,6 +14,7 @@ const fallbackData = {
 }
 
 export default function AuditLogs() {
+	const session = loadSession()
 	const [search, setSearch] = useState('')
 	const [moduleFilter, setModuleFilter] = useState('All Activity')
 	const [data, setData] = useState(fallbackData)
@@ -51,12 +53,67 @@ export default function AuditLogs() {
 		})
 	}, [data.logs, moduleFilter, search])
 
-	function handleExport() {
-		const header = 'Timestamp,Actor,Actor Role,Module,Action,Status,Details\n'
-		const rows = filteredLogs
-			.map((log) => `"${log.timestamp}","${log.actorName}","${log.actorRole}","${log.module}","${log.action}","${log.status}","${log.details.replaceAll('"', '""')}"`)
-			.join('\n')
-		downloadCsv(`${header}${rows}`, 'admin-audit-logs.csv')
+	async function handleExport() {
+		try {
+			const dateRange = await requestExportDateRange('Export audit log report')
+			if (!dateRange) {
+				return
+			}
+			const logoUrl = await resolveShiftSyncLogoDataUrl()
+			await downloadBrandedReport(
+				buildDatedFilename('admin-audit-logs', dateRange, 'pdf'),
+				buildBrandedReportDocument({
+					logoUrl,
+					brandName: 'ShiftSync Administration',
+				brandSubtitle: 'Admin audit trail',
+				reportTitle: 'Audit Log Report',
+				reportSubtitle: 'A printable record of administrative activity across the platform.',
+				generatedAt: new Date().toISOString(),
+				periodLabel: `${formatExportDate(dateRange.from)} to ${formatExportDate(dateRange.to)}`,
+				preparedBy: session?.fullName || 'ShiftSync Admin',
+				preparedByEmail: session?.email || 'noreply@shiftsync.local',
+				summaryCards: [
+					{ label: 'Loaded Logs', value: `${data.totalLogs}`, detail: `${filteredLogs.length} currently visible`, highlighted: true },
+					{ label: 'Security Events', value: `${data.securityEvents}`, detail: 'Login, password, or blocked-access events' },
+					{ label: 'Compliance Events', value: `${data.complianceEvents}`, detail: 'Policy and compliance-related records' },
+				],
+				metadataRows: [
+					['Module Filter', moduleFilter],
+					['Search', search.trim() || 'None'],
+					['Visible Rows', `${filteredLogs.length}`],
+				],
+				sections: [
+					{
+						title: 'Audit Log Table',
+						description: 'Searchable module-level activity captured by the admin workspace.',
+					columns: [
+						{ label: 'Timestamp', nowrap: true },
+						{ label: 'Actor' },
+						{ label: 'Actor Role' },
+						{ label: 'Module' },
+						{ label: 'Action' },
+						{ label: 'Status', nowrap: true },
+						{ label: 'Details' },
+					],
+						rows: filteredLogs.map((log) => [
+							log.timestamp,
+							log.actorName,
+							log.actorRole,
+							log.module,
+							log.action,
+							log.status,
+							log.details,
+						]),
+					},
+				],
+				footerLeft: `${filteredLogs.length} audit row(s)`,
+				footerRight: `Security: ${data.securityEvents} • Compliance: ${data.complianceEvents}`,
+				footerNote: 'This printable audit export reflects the current search and module filter state.',
+			})
+			)
+		} catch (exportError) {
+			setError(exportError.message || 'Unable to export the audit log report.')
+		}
 	}
 
 	return (
@@ -69,7 +126,7 @@ export default function AuditLogs() {
 			onSearchChange={setSearch}
 			headerActions={(
 				<button className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-[#eef2ff] px-4 text-xs font-bold text-[#1f3b9c] transition hover:bg-[#e3eafe]" onClick={handleExport}>
-					<FiDownload className="h-4 w-4" /> Export CSV
+					<FiDownload className="h-4 w-4" /> Export Report
 				</button>
 			)}
 		>

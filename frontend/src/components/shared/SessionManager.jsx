@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { clearSession, getSessionTimeoutMessage, isSessionExpired, loadSession, touchSession } from '../../lib/session'
+import { clearSession, getSessionTimeoutMessage, hasStoredSessionData, isSessionExpired, loadSession, touchSession } from '../../lib/session'
 
 const ACTIVITY_EVENTS = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart']
 
@@ -9,15 +9,22 @@ export default function SessionManager() {
 	const navigate = useNavigate()
 
 	useEffect(() => {
+		const hadStoredSessionData = hasStoredSessionData()
 		const session = loadSession()
 		if (!session) {
+			if (location.pathname !== '/login') {
+				navigate(hadStoredSessionData ? '/login?expired=1' : '/login', {
+					replace: true,
+					state: hadStoredSessionData ? { message: getSessionTimeoutMessage() } : undefined,
+				})
+			}
 			return
 		}
 
 		if (isSessionExpired(session)) {
 			clearSession()
 			if (location.pathname !== '/login') {
-				navigate('/login', {
+				navigate('/login?expired=1', {
 					replace: true,
 					state: { message: getSessionTimeoutMessage() },
 				})
@@ -33,7 +40,7 @@ export default function SessionManager() {
 
 			if (isSessionExpired(currentSession)) {
 				clearSession()
-				navigate('/login', {
+				navigate('/login?expired=1', {
 					replace: true,
 					state: { message: getSessionTimeoutMessage() },
 				})

@@ -149,6 +149,40 @@ public class ChatAssistantService {
     private ChatResponse fallbackResponse(ChatRequest request, User user, String latestUserMessage, String topic, String route) {
         String normalized = normalize(latestUserMessage);
         String contextPrefix = conversationalPrefix(user, request.role(), request.pathname());
+        boolean looksLikeShiftSyncQuestion = containsAny(
+            normalized,
+            "what is this system",
+            "what is shiftsync",
+            "about this system",
+            "what does this system do",
+            "login",
+            "log in",
+            "sign in",
+            "password",
+            "auto schedule",
+            "weekly shift",
+            "assign shift",
+            "schedule",
+            "swap",
+            "peer response",
+            "adjustment",
+            "time off",
+            "pay",
+            "payroll",
+            "salary",
+            "earnings",
+            "rwf",
+            "notification",
+            "message",
+            "alert",
+            "email reminder",
+            "report",
+            "analytics",
+            "compliance",
+            "employee",
+            "dashboard",
+            "profile"
+        );
 
         if (containsAny(normalized, "hello", "hi", "hey", "good morning", "good afternoon", "good evening")) {
             return new ChatResponse(
@@ -159,9 +193,27 @@ public class ChatAssistantService {
             );
         }
 
+        if (containsAny(normalized, "what are you doing", "what's up", "whats up", "how is life")) {
+            return new ChatResponse(
+                contextPrefix + "I'm here with you and ready to help. You can chat casually, ask me about your day, or jump into ShiftSync whenever you want.",
+                "Conversation",
+                null,
+                true
+            );
+        }
+
         if (containsAny(normalized, "how are you", "how are you doing", "how is your day")) {
             return new ChatResponse(
                 contextPrefix + "I'm doing well and ready to help. If you want, we can talk casually or jump into anything you need help with.",
+                "Conversation",
+                null,
+                true
+            );
+        }
+
+        if (containsAny(normalized, "how was your day", "what did you do today", "what did you eat", "what do you like")) {
+            return new ChatResponse(
+                contextPrefix + "My day is going pretty well so far. I've been focused on helping people keep things organized, and I don't need snacks, but I do appreciate a good conversation.",
                 "Conversation",
                 null,
                 true
@@ -181,6 +233,24 @@ public class ChatAssistantService {
             return new ChatResponse(
                 "I can explain ShiftSync features like scheduling, payroll, notifications, reports, compliance, swaps, and login. I can also handle normal day-to-day conversation, help you think through something, or answer general questions.",
                 "Capabilities",
+                null,
+                true
+            );
+        }
+
+        if (containsAny(normalized, "can we talk", "talk to me", "chat with me", "keep me company")) {
+            return new ChatResponse(
+                contextPrefix + "Of course. I'm here for a real conversation too. Tell me what's on your mind, or we can keep it light and simple.",
+                "Conversation",
+                null,
+                true
+            );
+        }
+
+        if (containsAny(normalized, "i am bored", "i'm bored", "boring", "nothing to do")) {
+            return new ChatResponse(
+                contextPrefix + "Boredom can be annoying. Want a quick distraction, a small plan for the next hour, or something light like a joke or a question game?",
+                "Conversation",
                 null,
                 true
             );
@@ -216,6 +286,33 @@ public class ChatAssistantService {
         if (containsAny(normalized, "tell me a joke", "joke", "make me laugh")) {
             return new ChatResponse(
                 "Here is one: Why did the schedule stay calm? Because it finally found some balance.",
+                "Conversation",
+                null,
+                true
+            );
+        }
+
+        if (containsAny(normalized, "should i", "what should i do", "help me decide", "advice")) {
+            return new ChatResponse(
+                contextPrefix + "I can help think it through. Tell me the two or three options you're considering, and I’ll help you weigh them without overcomplicating it.",
+                "Conversation",
+                null,
+                true
+            );
+        }
+
+        if (!looksLikeShiftSyncQuestion) {
+            if (containsAny(normalized, "how", "what", "why", "when", "where", "who", "can you", "could you", "would you", "tell me")) {
+                return new ChatResponse(
+                    contextPrefix + "That's a good question. Tell me a little more about what you're trying to figure out, and I'll answer naturally.",
+                    "Conversation",
+                    null,
+                    true
+                );
+            }
+
+            return new ChatResponse(
+                contextPrefix + "I'm here with you. You can chat normally, ask about your day, or bring up any ShiftSync question whenever you want.",
                 "Conversation",
                 null,
                 true
@@ -304,7 +401,7 @@ public class ChatAssistantService {
         }
 
         return new ChatResponse(
-            contextPrefix + "I can help with scheduling, login, payroll, notifications, swap approvals, reports, compliance, or employee workflows. If you want, ask me a direct question like 'How does auto schedule work?'",
+            contextPrefix + "I can help with scheduling, login, payroll, notifications, swap approvals, reports, compliance, employee workflows, or just a normal conversation. Ask me anything you like, and I’ll try to keep it natural.",
             topic,
             route,
             true
@@ -329,6 +426,7 @@ public class ChatAssistantService {
             - When the user is vague, ask one short clarifying question instead of guessing.
             - When useful, mention the page or feature the user should open next.
             - You may also handle general conversation, everyday questions, and light non-system topics.
+            - For casual conversation, answer naturally and do not force ShiftSync into the reply unless the user clearly asks about it.
             - When the topic is about ShiftSync, give product-specific answers grounded in the actual system behavior.
             - Do not invent features that are not in ShiftSync.
             - If the user asks for something unrelated to ShiftSync, answer it like a normal helpful assistant without forcing the conversation back to the system.

@@ -16,7 +16,7 @@ import {
 } from 'react-icons/fi'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../lib/api'
-import { downloadCsv } from '../../lib/export'
+import { buildBrandedReportDocument, buildDatedFilename, downloadBrandedReport, formatExportDate, requestExportDateRange, resolveShiftSyncLogoDataUrl } from '../../lib/export'
 import { clearSession, loadSession } from '../../lib/session'
 import EmployeeNotificationBell from '../shared/EmployeeNotificationBell'
 import EmployeeProfileMenu from '../shared/EmployeeProfileMenu'
@@ -118,29 +118,84 @@ export default function EarningsAndPays() {
 		}
 	}
 
-	function handleExportPayroll() {
+	async function handleExportPayroll() {
 		if (!visiblePayslips.length) {
 			setError('There are no payroll rows to export right now.')
 			return
 		}
 
-		const header = ['Period', 'Deposit Note', 'Gross Amount', 'Net Amount', 'Regular Hours', 'Overtime Hours']
-		const rows = visiblePayslips.map((item) =>
-			[
-				item.period,
-				item.depositNote,
-				item.grossAmount,
-				item.netAmount,
-				item.regularHours,
-				item.overtimeHours,
-			]
-				.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`)
-				.join(',')
-		)
-
-		downloadCsv([header.join(','), ...rows].join('\n'), 'employee-payroll-history.csv')
-		setError('')
-		setActionMessage('Payroll history exported successfully.')
+		try {
+			const dateRange = await requestExportDateRange('Export monthly payroll report')
+			if (!dateRange) {
+				return
+			}
+			const logoUrl = await resolveShiftSyncLogoDataUrl()
+			await downloadBrandedReport(
+				buildDatedFilename('employee-payroll-history', dateRange, 'pdf'),
+				buildBrandedReportDocument({
+					logoUrl,
+					brandName: 'ShiftSync',
+				brandSubtitle: 'ShiftSync employee payroll',
+				reportTitle: 'Monthly Payroll Report',
+				reportSubtitle: 'A printable payroll summary for the current month and recent payment history.',
+				generatedAt: new Date().toISOString(),
+				periodLabel: `${formatExportDate(dateRange.from)} to ${formatExportDate(dateRange.to)}`,
+				preparedBy: page.employeeName || 'ShiftSync',
+				preparedByEmail: session?.email || 'noreply@shiftsync.local',
+				summaryCards: page.summaryCards.map((card, index) => ({
+					label: card.label,
+					value: card.value,
+					detail: card.detail,
+					highlighted: index === 0,
+				})),
+				metadataRows: [
+					['Employee', page.employeeName || 'Employee'],
+					['Role', page.roleLabel || 'Employee'],
+					['Payroll Cycle', 'Monthly'],
+				],
+				sections: [
+					{
+						title: 'Hours Breakdown',
+						description: 'Current month hours and pay distribution.',
+					columns: [
+						{ label: 'Category' },
+						{ label: 'Hours', nowrap: true },
+						{ label: 'Rate', nowrap: true },
+						{ label: 'Amount', nowrap: true },
+					],
+						rows: page.breakdown.map((item) => [item.label, item.hours, item.rate, item.amount]),
+					},
+					{
+						title: 'Payroll History',
+						description: 'Visible payslips from the current payroll history view.',
+					columns: [
+						{ label: 'Period', nowrap: true },
+						{ label: 'Deposit Note' },
+						{ label: 'Gross Amount', nowrap: true },
+						{ label: 'Net Amount', nowrap: true },
+						{ label: 'Regular Hours', nowrap: true },
+						{ label: 'Overtime Hours', nowrap: true },
+					],
+						rows: visiblePayslips.map((item) => [
+							item.period,
+							item.depositNote,
+							item.grossAmount,
+							item.netAmount,
+							item.regularHours,
+							item.overtimeHours,
+						]),
+					},
+				],
+				footerLeft: `${visiblePayslips.length} payroll record(s)`,
+				footerRight: `Estimated monthly payroll: ${page.summaryCards?.[2]?.value || page.summaryCards?.[0]?.value || ''}`,
+				footerNote: 'Current month earnings are labeled as estimates until payroll is finalized.',
+			})
+			)
+			setError('')
+			setActionMessage('Payroll history exported successfully.')
+		} catch (exportError) {
+			setError(exportError.message || 'Unable to export payroll history.')
+		}
 	}
 
 	const normalizedSearch = searchTerm.trim().toLowerCase()
@@ -195,9 +250,19 @@ export default function EarningsAndPays() {
 									<div className={`text-[11px] font-extrabold uppercase tracking-[0.16em] ${card.highlighted ? 'text-blue-100' : 'text-slate-500'}`}>{card.label}</div>
 									<div className={`mt-2 text-5xl leading-none font-black tracking-[-0.05em] ${card.highlighted ? 'text-white' : 'text-slate-900'}`}>{card.value}</div>
 									{card.highlighted ? (
-										<span className="mt-4 inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-blue-100">{card.note}</span>
+										<div className="mt-4 space-y-1">
+											<span className="inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-blue-100">{card.note}</span>
+											{card.label.toLowerCase().includes('month') ? (
+												<div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-100/80">Estimated monthly payroll</div>
+											) : null}
+										</div>
 									) : (
-										<div className="mt-4 text-sm font-semibold text-[#2d5cf6]">{card.note}</div>
+										<div className="mt-4 space-y-1">
+											<div className="text-sm font-semibold text-[#2d5cf6]">{card.note}</div>
+											{card.label.toLowerCase().includes('month') ? (
+												<div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Estimated monthly payroll</div>
+											) : null}
+										</div>
 									)}
 								</article>
 							))}
@@ -212,7 +277,7 @@ export default function EarningsAndPays() {
 									</div>
 									<div className="flex flex-wrap items-center gap-2">
 										<button className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-600" onClick={refreshEarnings} type="button"><FiRefreshCw className="h-4 w-4" /> Refresh</button>
-										<button className="inline-flex items-center gap-2 rounded-full bg-[#0f51ff] px-4 py-2 text-xs font-bold text-white" onClick={handleExportPayroll} type="button"><FiDownload className="h-4 w-4" /> Export CSV</button>
+										<button className="inline-flex items-center gap-2 rounded-full bg-[#0f51ff] px-4 py-2 text-xs font-bold text-white" onClick={handleExportPayroll} type="button"><FiDownload className="h-4 w-4" /> Export Report</button>
 									</div>
 								</div>
 

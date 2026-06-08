@@ -228,6 +228,19 @@ function resolveNotificationPath(item) {
 	return null
 }
 
+function isEmailSystemNotification(item) {
+	const text = [item.title, item.description, item.kind].join(' ').toLowerCase()
+	return (
+		text.includes('emailed') ||
+		text.includes('email was sent') ||
+		text.includes('email sent') ||
+		text.includes('weekly shift summary sent') ||
+		text.includes('shift reminder email sent') ||
+		text.includes('temporary password instructions emailed') ||
+		text.includes('shift changes emailed')
+	)
+}
+
 export default function Notifications() {
 	const navigate = useNavigate()
 	const { manager, workspace, isLoading, error, reloadWorkspace } = useManagerWorkspace()
@@ -244,7 +257,7 @@ export default function Notifications() {
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
 	const allItems = useMemo(
-		() => [...notifications.todayItems, ...notifications.earlierItems],
+		() => [...notifications.todayItems, ...notifications.earlierItems].filter((item) => !isEmailSystemNotification(item)),
 		[notifications.earlierItems, notifications.todayItems],
 	)
 	const normalizedSearch = searchTerm.trim().toLowerCase()

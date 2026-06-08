@@ -31,7 +31,8 @@ public final class AuthDtos {
     public record ChangePasswordRequest(
         Long userId,
         @NotBlank String currentPassword,
-        @NotBlank String newPassword
+        @NotBlank String newPassword,
+        @NotBlank String confirmPassword
     ) {
     }
 

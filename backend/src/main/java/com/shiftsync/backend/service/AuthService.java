@@ -88,12 +88,15 @@ public class AuthService {
         if (request.newPassword().length() < 6) {
             throw new IllegalArgumentException("New password must be at least 6 characters long");
         }
+        if (!request.newPassword().equals(request.confirmPassword())) {
+            throw new IllegalArgumentException("New password and confirmation do not match");
+        }
 
         User user = userRepository.findById(request.userId())
             .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
-            throw new IllegalArgumentException("Current password is incorrect");
+            throw new IllegalArgumentException("Current password is incorrect. Please enter the password you are currently using.");
         }
 
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));

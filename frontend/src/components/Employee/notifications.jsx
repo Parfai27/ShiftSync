@@ -151,6 +151,18 @@ export default function EmployeeNotifications() {
 		}
 	}, [session?.userId])
 
+	useEffect(() => {
+		if (!session?.userId) {
+			return undefined
+		}
+
+		const intervalId = window.setInterval(() => {
+			void reloadNotifications()
+		}, 3000)
+
+		return () => window.clearInterval(intervalId)
+	}, [session?.userId])
+
 	async function reloadNotifications() {
 		if (!session?.userId) {
 			setError('No employee session found. Please log in again.')

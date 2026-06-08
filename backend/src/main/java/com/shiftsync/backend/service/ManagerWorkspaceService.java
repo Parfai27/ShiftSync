@@ -127,7 +127,6 @@ public class ManagerWorkspaceService {
         "EUR - English"
     );
     private static final List<String> CANONICAL_SHIFT_NAMES = List.of(
-        "Evening Shift",
         "1st Shift",
         "2nd Shift"
     );
@@ -184,7 +183,7 @@ public class ManagerWorkspaceService {
         return new ManagerWorkspaceResponse(
             buildIdentity(manager),
             buildProfilesSection(manager, branchEmployees, branchShifts, assignments, profilesByUserId),
-            buildSchedulingSection(activeEmployees, branchShifts, assignments, safeRangeDays),
+            buildSchedulingSection(activeEmployees, branchShifts, assignments, adjustments, safeRangeDays),
             buildAdjustmentsSection(adjustments, auditLogs),
             buildNotificationsSection(managerNotifications, adjustments, policies),
             buildComplianceSection(branchShifts, policies, auditLogs),
@@ -232,15 +231,17 @@ public class ManagerWorkspaceService {
                 .build()
         );
 
-        notificationRepository.save(
-            Notification.builder()
-                .title("Adjustment " + request.status().name().toLowerCase(Locale.ENGLISH))
-                .message("Your " + adjustment.getAdjustmentType() + " request was " + request.status().name().toLowerCase(Locale.ENGLISH) + " by " + manager.getFullName() + ".")
-                .priority(request.status() == AdjustmentStatus.APPROVED ? NotificationPriority.MEDIUM : NotificationPriority.HIGH)
-                .recipient(adjustment.getEmployee())
-                .read(false)
-                .build()
-        );
+        if (request.status() != AdjustmentStatus.APPROVED) {
+            notificationRepository.save(
+                Notification.builder()
+                    .title("Adjustment " + request.status().name().toLowerCase(Locale.ENGLISH))
+                    .message("Your " + adjustment.getAdjustmentType() + " request was " + request.status().name().toLowerCase(Locale.ENGLISH) + " by " + manager.getFullName() + ".")
+                    .priority(NotificationPriority.HIGH)
+                    .recipient(adjustment.getEmployee())
+                    .read(false)
+                    .build()
+            );
+        }
     }
 
     private void applyApprovedAdjustment(ShiftAdjustmentRequest adjustment, User manager) {
@@ -255,6 +256,21 @@ public class ManagerWorkspaceService {
                 shift.setAssignedStaff(Math.max(0, shift.getAssignedStaff() - 1));
                 updateShiftStaffingStatus(shift);
                 shiftRepository.save(shift);
+                notificationRepository.save(
+                    Notification.builder()
+                        .title("Time off approved")
+                        .message(buildTimeOffApprovedMessage(adjustment.getShift()))
+                        .priority(NotificationPriority.MEDIUM)
+                        .recipient(adjustment.getEmployee())
+                        .read(false)
+                        .build()
+                );
+                sendShiftChangeEmail(
+                    adjustment.getEmployee(),
+                    adjustment.getShift().getShiftDate(),
+                    "Your shift time-off request was approved.",
+                    "Your approved time-off request removed this shift from your schedule."
+                );
             }
             return;
         }
@@ -281,6 +297,8 @@ public class ManagerWorkspaceService {
             throw new IllegalArgumentException("Shift swaps must happen between shifts on the same day.");
         }
 
+        Shift requesterShiftBefore = currentAssignment.getShift();
+        Shift targetShiftBefore = targetAssignment.getShift();
         String requesterRole = resolveShiftRole(adjustment.getEmployee());
         String targetRole = resolveShiftRole(adjustment.getTargetEmployee());
         if (requesterRole == null || targetRole == null || !requesterRole.equals(targetRole)) {
@@ -303,12 +321,86 @@ public class ManagerWorkspaceService {
         notificationRepository.save(
             Notification.builder()
                 .title("Shift swap approved")
-                .message("Your shift swap for " + adjustment.getShift().getShiftDate() + " was approved by " + manager.getFullName() + ".")
+                .message(buildSwapApprovedMessage(
+                    adjustment.getEmployee(),
+                    requesterShiftBefore,
+                    adjustment.getTargetShift()
+                ))
+                .priority(NotificationPriority.MEDIUM)
+                .recipient(adjustment.getEmployee())
+                .read(false)
+                .build()
+        );
+        notificationRepository.save(
+            Notification.builder()
+                .title("Shift swap approved")
+                .message(buildSwapApprovedMessage(
+                    adjustment.getTargetEmployee(),
+                    targetShiftBefore,
+                    adjustment.getShift()
+                ))
                 .priority(NotificationPriority.MEDIUM)
                 .recipient(adjustment.getTargetEmployee())
                 .read(false)
                 .build()
         );
+
+        sendShiftChangeEmail(
+            adjustment.getEmployee(),
+            adjustment.getShift().getShiftDate(),
+            "Your shift swap was approved.",
+            buildSwapApprovedMessage(adjustment.getEmployee(), requesterShiftBefore, adjustment.getTargetShift())
+        );
+        sendShiftChangeEmail(
+            adjustment.getTargetEmployee(),
+            adjustment.getTargetShift().getShiftDate(),
+            "Your shift swap was approved.",
+            buildSwapApprovedMessage(adjustment.getTargetEmployee(), targetShiftBefore, adjustment.getShift())
+        );
+    }
+
+    private void sendShiftChangeEmail(User employee, LocalDate referenceDate, String subject, String summaryLine) {
+        if (employee == null || employee.getEmail() == null || employee.getEmail().isBlank()) {
+            return;
+        }
+
+        LocalDate weekStart = referenceDate.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+        LocalDate weekEnd = weekStart.plusDays(6);
+
+        List<ShiftAssignment> weeklyAssignments = shiftAssignmentRepository.findByEmployeeId(employee.getId()).stream()
+            .filter(item -> item.getShift() != null)
+            .filter(item -> !item.getShift().getShiftDate().isBefore(weekStart) && !item.getShift().getShiftDate().isAfter(weekEnd))
+            .sorted(Comparator.comparing((ShiftAssignment item) -> item.getShift().getShiftDate()).thenComparing(item -> item.getShift().getStartTime()))
+            .toList();
+
+        boolean sent = credentialEmailService.sendShiftChangeNotice(
+            employee.getEmail(),
+            employee.getFullName(),
+            subject,
+            summaryLine,
+            weeklyAssignments
+        );
+
+        if (sent) {
+            return;
+        }
+    }
+
+    private String buildTimeOffApprovedMessage(Shift shift) {
+        return "Your time off was approved for " + shift.getName()
+            + " on " + shift.getShiftDate()
+            + " (" + formatShiftWindow(shift) + ").";
+    }
+
+    private String buildSwapApprovedMessage(User employee, Shift beforeShift, Shift afterShift) {
+        String employeeName = employee != null ? employee.getFullName() : "The employee";
+        return employeeName + " was moved from "
+            + beforeShift.getName()
+            + " on " + beforeShift.getShiftDate()
+            + " (" + formatShiftWindow(beforeShift) + ") to "
+            + afterShift.getName()
+            + " on " + afterShift.getShiftDate()
+            + " (" + formatShiftWindow(afterShift) + ").";
     }
 
     @Transactional
@@ -773,7 +865,7 @@ public class ManagerWorkspaceService {
         );
     }
 
-    private SchedulingSection buildSchedulingSection(List<User> employees, List<Shift> shifts, List<ShiftAssignment> assignments, int rangeDays) {
+    private SchedulingSection buildSchedulingSection(List<User> employees, List<Shift> shifts, List<ShiftAssignment> assignments, List<ShiftAdjustmentRequest> adjustments, int rangeDays) {
         List<Shift> canonicalShifts = shifts.stream()
             .filter(this::isCanonicalShift)
             .sorted(Comparator.comparing(Shift::getShiftDate).thenComparing(Shift::getStartTime))
@@ -790,6 +882,13 @@ public class ManagerWorkspaceService {
         List<Shift> nextWeekShifts = canonicalShifts.stream()
             .filter(shift -> !shift.getShiftDate().isBefore(rangeStart))
             .filter(shift -> !shift.getShiftDate().isAfter(rangeEnd))
+            .toList();
+
+        List<ShiftAdjustmentRequest> previewSwaps = adjustments == null ? List.of() : adjustments.stream()
+            .filter(item -> "Shift Swap".equalsIgnoreCase(item.getAdjustmentType()))
+            .filter(item -> item.getStatus() == AdjustmentStatus.PENDING)
+            .filter(item -> item.getTargetEmployeeResponse() == SwapResponseStatus.ACCEPTED)
+            .filter(item -> item.getTargetEmployee() != null && item.getTargetShift() != null)
             .toList();
 
         int totalHours = nextWeekShifts.stream()
@@ -843,11 +942,37 @@ public class ManagerWorkspaceService {
                             List<ScheduledRoleSlot> roleSlots = REQUIRED_SHIFT_ROLES.stream()
                                 .map(role -> {
                                     ShiftAssignment assignment = assignmentByRole.get(role);
+                                    String employeeName = assignment != null ? assignment.getEmployee().getFullName() : null;
+                                    String employeeAvatar = assignment != null ? initials(assignment.getEmployee().getFullName()) : roleInitials(role);
+                                    String status = assignment != null ? "ASSIGNED" : "OPEN";
+
+                                    for (ShiftAdjustmentRequest preview : previewSwaps) {
+                                        boolean requesterShiftMatch = preview.getShift().getId().equals(shift.getId())
+                                            && assignment != null
+                                            && assignment.getEmployee().getId().equals(preview.getEmployee().getId());
+                                        boolean targetShiftMatch = preview.getTargetShift().getId().equals(shift.getId())
+                                            && assignment != null
+                                            && assignment.getEmployee().getId().equals(preview.getTargetEmployee().getId());
+
+                                        if (requesterShiftMatch) {
+                                            employeeName = preview.getTargetEmployee().getFullName();
+                                            employeeAvatar = initials(employeeName);
+                                            status = "PENDING_MANAGER";
+                                            break;
+                                        }
+                                        if (targetShiftMatch) {
+                                            employeeName = preview.getEmployee().getFullName();
+                                            employeeAvatar = initials(employeeName);
+                                            status = "PENDING_MANAGER";
+                                            break;
+                                        }
+                                    }
+
                                     return new ScheduledRoleSlot(
                                         role,
-                                        assignment != null ? assignment.getEmployee().getFullName() : null,
-                                        assignment != null ? initials(assignment.getEmployee().getFullName()) : roleInitials(role),
-                                        assignment != null ? "ASSIGNED" : "OPEN"
+                                        employeeName,
+                                        employeeAvatar,
+                                        status
                                     );
                                 })
                                 .toList();
@@ -919,7 +1044,6 @@ public class ManagerWorkspaceService {
             .toList();
 
         List<LegendItem> legend = List.of(
-            new LegendItem("Evening Shift", "bg-slate-900"),
             new LegendItem("1st Shift", "bg-blue-600"),
             new LegendItem("2nd Shift", "bg-indigo-500"),
             new LegendItem("Coverage Gap", "bg-red-500")
@@ -945,7 +1069,7 @@ public class ManagerWorkspaceService {
             legend,
             new SchedulingOverviewCard(
                 "Schedule Overview",
-                "Weekly 24/7 staffing snapshot",
+                "Weekly two-shift staffing snapshot",
                 busiestShift == null ? "No shifts yet" : busiestShift.getName() + " • " + formatShiftWindow(busiestShift),
                 employees.size() + " pharmacy staff active",
                 dailyCoverageAlerts.isEmpty()
@@ -957,7 +1081,7 @@ public class ManagerWorkspaceService {
                 "Balance role coverage across the weekly rota",
                 openShifts > 0
                     ? "Fill the earliest open role on the weekly rota to keep both the pharmacist and assistant present every day."
-                    : "Coverage is healthy. Keep the current weekly rotation and watch fatigue across overnight and late shifts.",
+                    : "Coverage is healthy. Keep the current weekly rotation and watch fatigue across both shifts.",
                 "Assign Available Staff"
             )
         );
@@ -969,6 +1093,9 @@ public class ManagerWorkspaceService {
                 request.getId(),
                 request.getEmployee().getFullName(),
                 request.getAdjustmentType() + " • " + request.getCreatedAt().format(DATE_LABEL),
+                request.getShift().getShiftDate().toString(),
+                request.getShift().getName(),
+                formatShiftWindow(request.getShift()),
                 request.getShift().getName(),
                 request.getShift().getShiftDate().format(DATE_LABEL) + " • " + formatShiftWindow(request.getShift()),
                 request.getTargetEmployee() == null
@@ -982,6 +1109,7 @@ public class ManagerWorkspaceService {
                                 ? " | Peer response: " + request.getTargetEmployeeResponse().name()
                                 : ""
                         ),
+                request.getTargetEmployeeResponse() != null ? request.getTargetEmployeeResponse().name() : "NOT_REQUIRED",
                 request.getRequestedChange(),
                 request.getStatus().name()
             ))
@@ -1199,7 +1327,8 @@ public class ManagerWorkspaceService {
                     profile != null ? profile.getEmployeeCode() : "EMP-" + employee.getId(),
                     shift.getShiftDate().format(DATE_LABEL),
                     resolveDepartment(profile),
-                    shift.getStartTime().format(SHIFT_TIME),
+                    item.getClockedInAt() != null ? item.getClockedInAt().toLocalTime().format(SHIFT_TIME) : "--",
+                    item.getClockedOutAt() != null ? item.getClockedOutAt().toLocalTime().format(SHIFT_TIME) : "--",
                     status,
                     danger
                 );

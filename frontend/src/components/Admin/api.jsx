@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { FiBookOpen, FiCheckCircle, FiCode, FiCpu, FiPlus, FiServer } from 'react-icons/fi'
 import { useNavigate } from 'react-router-dom'
 import AdminFrame from './AdminFrame.jsx'
-import { getAdminIntegrations, updateAdminIntegrationConfig } from '../../lib/adminWorkspace'
+import { getAdminIntegrations, getAdminSettingsWorkspace, updateAdminGeneralSettings, updateAdminIntegrationConfig } from '../../lib/adminWorkspace'
 import { loadSession } from '../../lib/session'
 
 const fallbackData = {
@@ -13,6 +13,7 @@ const fallbackData = {
 	aiModel: 'Fallback mode',
 	publicApiEnabled: false,
 	auditLoggingEnabled: false,
+	timezone: 'Africa/Kigali',
 }
 
 export default function ApiIntegrations() {
@@ -25,17 +26,23 @@ export default function ApiIntegrations() {
 	const [aiBaseUrl, setAiBaseUrl] = useState('')
 	const [aiModel, setAiModel] = useState('')
 	const [savingConfig, setSavingConfig] = useState(false)
+	const [savingFlags, setSavingFlags] = useState(false)
+	const [timezone, setTimezone] = useState('Africa/Kigali')
 
 	useEffect(() => {
 		let cancelled = false
 
 		async function loadIntegrations() {
 			try {
-				const response = await getAdminIntegrations()
+				const [response, settings] = await Promise.all([
+					getAdminIntegrations(),
+					getAdminSettingsWorkspace(),
+				])
 				if (!cancelled) {
 					setData(response)
 					setAiBaseUrl(response.aiBaseUrl || '')
 					setAiModel(response.aiModel || '')
+					setTimezone(settings.timezone || 'Africa/Kigali')
 				}
 			} catch (loadError) {
 				if (!cancelled) {
@@ -96,6 +103,30 @@ export default function ApiIntegrations() {
 			setError(saveError.message || 'Unable to save AI provider configuration.')
 		} finally {
 			setSavingConfig(false)
+		}
+	}
+
+	async function handleTogglePlatformFlag(flagKey, nextValue) {
+		setSavingFlags(true)
+		setActionMessage('')
+		setError('')
+		try {
+			const response = await updateAdminGeneralSettings({
+				actorUserId: session?.userId ?? null,
+				timezone,
+				auditLoggingEnabled: flagKey === 'auditLoggingEnabled' ? nextValue : data.auditLoggingEnabled,
+				publicApiEnabled: flagKey === 'publicApiEnabled' ? nextValue : data.publicApiEnabled,
+			})
+			setData((current) => ({
+				...current,
+				auditLoggingEnabled: response.auditLoggingEnabled,
+				publicApiEnabled: response.publicApiEnabled,
+			}))
+			setActionMessage(`${flagKey === 'publicApiEnabled' ? 'Public API access' : 'Audit logging'} is now ${nextValue ? 'enabled' : 'disabled'}.`)
+		} catch (flagError) {
+			setError(flagError.message || 'Unable to update platform settings.')
+		} finally {
+			setSavingFlags(false)
 		}
 	}
 
@@ -188,11 +219,29 @@ export default function ApiIntegrations() {
 							</div>
 							<div className="flex items-center justify-between rounded-xl bg-white/10 px-4 py-3">
 								<span>Public API</span>
-								<span className="font-bold text-white">{data.publicApiEnabled ? 'Enabled' : 'Restricted'}</span>
+								<button
+									type="button"
+									disabled={savingFlags}
+									onClick={() => handleTogglePlatformFlag('publicApiEnabled', !data.publicApiEnabled)}
+									className="font-bold text-white underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-70"
+								>
+									{data.publicApiEnabled ? 'Enabled' : 'Restricted'}
+								</button>
 							</div>
 							<div className="flex items-center justify-between rounded-xl bg-white/10 px-4 py-3">
 								<span>Audit Logging</span>
-								<span className="font-bold text-white">{data.auditLoggingEnabled ? 'Enabled' : 'Disabled'}</span>
+								<button
+									type="button"
+									disabled={savingFlags}
+									onClick={() => handleTogglePlatformFlag('auditLoggingEnabled', !data.auditLoggingEnabled)}
+									className="font-bold text-white underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-70"
+								>
+									{data.auditLoggingEnabled ? 'Enabled' : 'Disabled'}
+								</button>
+							</div>
+							<div className="rounded-xl bg-white/10 px-4 py-3 text-xs leading-5 text-blue-100">
+								<div className="font-bold text-white">Current timezone</div>
+								<div className="mt-1">{timezone}</div>
 							</div>
 						</div>
 					</article>
@@ -211,6 +260,14 @@ export default function ApiIntegrations() {
 								<input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-[#0f51ff]" onChange={(event) => setAiModel(event.target.value)} value={aiModel} />
 							</label>
 							<p className="text-xs leading-5 text-slate-500">This changes the runtime base URL and model used by Sync. API keys remain environment-managed for security.</p>
+							<div className="grid gap-2 sm:grid-cols-2">
+								<button className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-[#0f51ff] hover:text-[#0f51ff]" onClick={() => navigate('/admin-settings')} type="button">
+									Open Admin Settings
+								</button>
+								<button className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-[#0f51ff] hover:text-[#0f51ff]" onClick={() => navigate('/admin-auditlogs')} type="button">
+									View Audit Logs
+								</button>
+							</div>
 							<button className="w-full rounded-xl bg-[#0f51ff] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#0b44de]" disabled={savingConfig} onClick={handleSaveProviderConfig} type="button">
 								{savingConfig ? 'Saving...' : 'Save provider config'}
 							</button>
