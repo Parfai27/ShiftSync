@@ -25,8 +25,10 @@ A comprehensive workforce management platform designed to streamline employee sc
 - **Authentication** - JWT Bearer tokens with BCrypt password hashing and role-based API access
 - **Session Management** - Client-side session storage with idle timeout; server validates JWT on every request
 - **Email Notifications** - Automated credential delivery and system notifications
-- **Data Export** - CSV, JSON, and SVG export capabilities for schedules and reports
-- **Responsive Design** - Mobile-friendly interface optimized for all screen sizes
+- **Data Export** - CSV, JSON, and SVG export capabilities with customizable export picker modal; profile and report exports
+- **Chatbot Assistant** - Integrated ShiftSync Assistant with knowledge base for system help and guidance
+- **Admin Workspace** - Centralized admin dashboard with settings, user management, and system configuration
+- **Responsive Design** - Mobile-friendly interface optimized for all screen sizes including mobile admin menu
 
 ## 🛠️ Tech Stack
 
@@ -185,9 +187,16 @@ ShiftSync/
 - `POST /api/manager/announcements` - Send announcements
 
 ### Admin Endpoints
-- `GET /api/admin/users` - User management
-- `GET /api/admin/audit-logs` - Audit logs
-- `POST /api/admin/settings` - System settings
+- `GET /api/admin/users` - User management and employee roster
+- `GET /api/admin/audit-logs` - Audit logs and system activity
+- `GET /api/admin/settings` - Retrieve system settings
+- `POST /api/admin/settings` - Update system settings
+- `GET /api/admin/system-overview` - System health and metrics
+
+### Chat/Chatbot Endpoints
+- `POST /api/chat/message` - Send message to chatbot
+- `POST /api/chat/query` - Query chatbot knowledge base
+- `GET /api/chat/history/{userId}` - Retrieve chat history
 
 ## 🔐 Security Features
 
@@ -206,10 +215,14 @@ ShiftSync/
 - **User** - System users with roles
 - **EmployeeProfile** - Employee information and metadata
 - **Shift** - Scheduled work periods
+- **ShiftAssignment** - Shift assignments to employees
 - **ShiftAdjustmentRequest** - Time-off and swap requests
 - **Payroll** - Payment records and history
 - **Notification** - System notifications
 - **AuditLog** - System activity tracking
+- **SystemSetting** - Configurable system parameters
+- **Availability** - Employee availability tracking
+- **PayrollRecord** - Detailed payroll transaction records
 
 ## 📝 User Roles
 
@@ -238,6 +251,15 @@ For issues and questions:
 
 ## 🔄 Recent Updates
 
+### Version 1.1.0 (June 2026)
+- ✅ ShiftSync Chatbot Assistant with knowledge base
+- ✅ Enhanced admin workspace and settings management
+- ✅ Improved export picker modal with multiple format options
+- ✅ Profile and report export utilities
+- ✅ System settings management with configurable parameters
+- ✅ Enhanced JWT authentication and session management
+- ✅ Mobile admin menu for responsive admin access
+
 ### Version 1.0.0
 - ✅ Employee dashboard with real-time data
 - ✅ Payroll management system
@@ -250,6 +272,8 @@ For issues and questions:
 
 ## 🚧 Roadmap
 
+- [x] Chatbot Assistant with knowledge base
+- [x] Admin workspace and system settings
 - [ ] Mobile app (React Native)
 - [ ] Advanced analytics and forecasting
 - [ ] Biometric time tracking
@@ -267,6 +291,6 @@ For issues and questions:
 
 ---
 
-**Last Updated:** May 24, 2026
+**Last Updated:** June 8, 2026
 
 For the latest updates, visit the [GitHub Repository](https://github.com/Parfai27/ShiftSync)
