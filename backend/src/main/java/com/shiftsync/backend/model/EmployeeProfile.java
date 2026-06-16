@@ -31,6 +31,9 @@ public class EmployeeProfile extends BaseEntity {
     @Column(nullable = false)
     private String jobTitle;
 
+    @Column(length = 1000)
+    private String coreExpertise;
+
     private String phoneNumber;
 
     private LocalDate hireDate;

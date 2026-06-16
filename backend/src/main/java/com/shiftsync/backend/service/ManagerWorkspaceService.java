@@ -66,6 +66,7 @@ import com.shiftsync.backend.repository.AuditLogRepository;
 import com.shiftsync.backend.repository.BranchRepository;
 import com.shiftsync.backend.repository.CompliancePolicyRepository;
 import com.shiftsync.backend.repository.AvailabilityRepository;
+import com.shiftsync.backend.repository.DeletedSeedEmployeeRepository;
 import com.shiftsync.backend.repository.EmployeeProfileRepository;
 import com.shiftsync.backend.repository.NotificationRepository;
 import com.shiftsync.backend.repository.PayrollRecordRepository;
@@ -104,6 +105,17 @@ public class ManagerWorkspaceService {
     private static final List<String> ALLOWED_EMPLOYEE_JOB_TITLES = List.of(
         "Pharmacist",
         "Pharmacy Assistant / Attendant"
+    );
+
+    private static final List<String> ALLOWED_CORE_EXPERTISE = List.of(
+        "Prescription Review",
+        "Medication Dispensing",
+        "Patient Counseling",
+        "Inventory Control",
+        "Controlled Medicines",
+        "Vaccination Support",
+        "Stock Receiving",
+        "Insurance Claims"
     );
     private static final List<String> ALLOWED_POLICY_CATEGORIES = List.of(
         "Scheduling",
@@ -144,6 +156,7 @@ public class ManagerWorkspaceService {
     private final NotificationRepository notificationRepository;
     private final PayrollRecordRepository payrollRecordRepository;
     private final CompliancePolicyRepository compliancePolicyRepository;
+    private final DeletedSeedEmployeeRepository deletedSeedEmployeeRepository;
     private final AuditLogRepository auditLogRepository;
     private final PasswordEncoder passwordEncoder;
     private final CredentialEmailService credentialEmailService;
@@ -535,6 +548,16 @@ public class ManagerWorkspaceService {
         notificationRepository.deleteByRecipientId(employee.getId());
         auditLogRepository.deleteByActorId(employee.getId());
         employeeProfileRepository.deleteByUserId(employee.getId());
+
+        deletedSeedEmployeeRepository.findByUsername(employee.getUsername())
+            .orElseGet(() -> deletedSeedEmployeeRepository.save(
+                com.shiftsync.backend.model.DeletedSeedEmployee.builder()
+                    .username(employee.getUsername())
+                    .fullName(employee.getFullName())
+                    .deletedAt(java.time.LocalDateTime.now())
+                    .build()
+            ));
+
         userRepository.delete(employee);
 
         auditLogRepository.save(
@@ -600,6 +623,7 @@ public class ManagerWorkspaceService {
         String fullName = normalizeRequiredText(request.fullName(), "Employee full name is required.");
         String email = normalizeRequiredText(request.email(), "Employee email is required.").toLowerCase(Locale.ENGLISH);
         String normalizedJobTitle = normalizeJobTitle(request.jobTitle());
+        String normalizedExpertise = normalizeCoreExpertise(request.coreExpertise());
         validatePhoneNumber(request.phoneNumber());
 
         userRepository.findByEmail(email)
@@ -627,6 +651,7 @@ public class ManagerWorkspaceService {
             .user(employee)
             .employeeCode(generateEmployeeCode())
             .jobTitle(normalizedJobTitle)
+            .coreExpertise(normalizedExpertise)
             .phoneNumber(normalizeOptional(request.phoneNumber()))
             .hireDate(request.hireDate() != null ? request.hireDate() : LocalDate.now())
             .hourlyRate(null)
@@ -1467,6 +1492,17 @@ public class ManagerWorkspaceService {
         return List.of("Dispensing", "Patient counselling", "Controlled drug logs", "Pharmacy operations");
     }
 
+    private List<String> expertiseForEmployee(EmployeeProfile profile) {
+        if (profile != null && profile.getCoreExpertise() != null && !profile.getCoreExpertise().isBlank()) {
+            return java.util.Arrays.stream(profile.getCoreExpertise().split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
+        }
+        return expertiseForRole(profile != null ? profile.getJobTitle() : "Pharmacy Staff");
+    }
+
     private List<Boolean> weeklyAvailability(List<ShiftAssignment> assignments, Long employeeId) {
         LocalDate start = LocalDate.now().with(DayOfWeek.MONDAY);
         List<Boolean> values = new ArrayList<>();
@@ -1569,6 +1605,32 @@ public class ManagerWorkspaceService {
         return normalized;
     }
 
+    private String normalizeCoreExpertise(List<String> coreExpertise) {
+        if (coreExpertise == null || coreExpertise.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one core expertise.");
+        }
+
+        List<String> normalized = new ArrayList<>();
+        for (String expertise : coreExpertise) {
+            String value = expertise == null ? "" : expertise.trim();
+            if (value.isBlank()) {
+                continue;
+            }
+            if (!ALLOWED_CORE_EXPERTISE.contains(value)) {
+                throw new IllegalArgumentException("Invalid core expertise selected: " + value);
+            }
+            if (!normalized.contains(value)) {
+                normalized.add(value);
+            }
+        }
+
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one core expertise.");
+        }
+
+        return String.join(", ", normalized);
+    }
+
     private void validatePhoneNumber(String phoneNumber) {
         if (phoneNumber == null || phoneNumber.isBlank()) {
             return;
@@ -1642,7 +1704,7 @@ public class ManagerWorkspaceService {
             profile != null && profile.getHireDate() != null ? profile.getHireDate().format(DATE_LABEL) : "Not recorded",
             manager.getBranch().getLocation(),
             workloadHours + "h / 40h weekly",
-            expertiseForRole(profile != null ? profile.getJobTitle() : "Pharmacy Staff"),
+            expertiseForEmployee(profile),
             weeklyAvailability(assignments, employee.getId()),
             employee.isActive()
         );

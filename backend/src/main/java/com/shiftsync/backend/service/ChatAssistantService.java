@@ -231,7 +231,7 @@ public class ChatAssistantService {
 
         if (containsAny(normalized, "what can you do", "how can you help")) {
             return new ChatResponse(
-                "I can explain ShiftSync features like scheduling, payroll, notifications, reports, compliance, swaps, and login. I can also handle normal day-to-day conversation, help you think through something, or answer general questions.",
+                "I can explain ShiftSync features like scheduling, notifications, reports, compliance, swaps, and login. I can also handle normal day-to-day conversation, help you think through something, or answer general questions.",
                 "Capabilities",
                 null,
                 true
@@ -393,7 +393,7 @@ public class ChatAssistantService {
 
         if (containsAny(normalized, "employee", "dashboard", "profile")) {
             return new ChatResponse(
-                contextPrefix + "Employees can check their schedule, profile, announcements, notifications, and monthly payroll information. Newly created employees sign in with a temporary password first and then change it on first login.",
+                contextPrefix + "Employees can check their schedule, profile, announcements, and notifications. Newly created employees sign in with a temporary password first and then change it on first login.",
                 "Employee workflows",
                 "/employee-dashboard",
                 true
@@ -401,7 +401,7 @@ public class ChatAssistantService {
         }
 
         return new ChatResponse(
-            contextPrefix + "I can help with scheduling, login, payroll, notifications, swap approvals, reports, compliance, employee workflows, or just a normal conversation. Ask me anything you like, and I’ll try to keep it natural.",
+            contextPrefix + "I can help with scheduling, login, notifications, swap approvals, reports, compliance, employee workflows, or just a normal conversation. Ask me anything you like, and I’ll try to keep it natural.",
             topic,
             route,
             true
@@ -434,7 +434,7 @@ public class ChatAssistantService {
             About ShiftSync:
             - ShiftSync is an intelligent employee shift scheduling system for pharmacy workforce management.
             - Managers create weekly shifts, assign employees, review time-off and swap requests, monitor compliance, and review reports.
-            - Employees use dashboards for schedule, announcements, payroll, profile, notifications, and settings.
+            - Employees use dashboards for schedule, announcements, profile, notifications, and settings.
             - Login uses email and password.
             - A newly created employee gets a temporary password and must change it on first login.
             - Forgot Password emails reset instructions.

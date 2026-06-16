@@ -256,7 +256,7 @@ export default function Scheduling() {
 				method: 'POST',
 				body: JSON.stringify({ managerId: manager.userId }),
 			})
-			await reloadWorkspace()
+			void reloadWorkspace({ silent: true })
 		} catch (requestError) {
 			setActionError(requestError.message || fallbackMessage)
 		} finally {
@@ -283,7 +283,7 @@ export default function Scheduling() {
 					shiftName: manualAssignment.shiftName,
 				}),
 			})
-			await reloadWorkspace()
+			void reloadWorkspace({ silent: true })
 			setActionMessage('Employee assigned successfully.')
 			setIsAssignModalOpen(false)
 			setManualAssignment({
@@ -317,7 +317,7 @@ export default function Scheduling() {
 					shiftName,
 				}),
 			})
-			await reloadWorkspace()
+			void reloadWorkspace({ silent: true })
 			setActionMessage('Shift assigned successfully.')
 		} catch (requestError) {
 			setActionError(requestError.message || 'Unable to assign this shift by drag and drop.')
@@ -347,7 +347,7 @@ export default function Scheduling() {
 					shiftName,
 				}),
 			})
-			await reloadWorkspace()
+			void reloadWorkspace({ silent: true })
 			setActionMessage('Shift reassigned successfully.')
 		} catch (requestError) {
 			setActionError(requestError.message || 'Unable to reassign this shift by drag and drop.')
@@ -414,7 +414,7 @@ export default function Scheduling() {
 					shiftName: managedAssignment.shiftName,
 				}),
 			})
-			await reloadWorkspace()
+			void reloadWorkspace({ silent: true })
 			setActionMessage('Shift assignment removed successfully.')
 			setManagedAssignment(null)
 		} catch (requestError) {
@@ -444,7 +444,7 @@ export default function Scheduling() {
 					shiftName: managedAssignment.shiftName,
 				}),
 			})
-			await reloadWorkspace()
+			void reloadWorkspace({ silent: true })
 			setActionMessage('Shift reassigned successfully.')
 			setManagedAssignment(null)
 			setReplacementEmployeeId('')

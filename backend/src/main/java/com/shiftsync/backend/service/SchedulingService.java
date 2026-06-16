@@ -37,8 +37,10 @@ import java.time.LocalTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -214,20 +216,61 @@ public class SchedulingService {
     @Transactional
     public List<Shift> autoSchedule(ManagerSchedulingActionRequest request) {
         User manager = getManager(request.managerId());
-        List<Shift> openShifts = shiftRepository.findByBranchId(manager.getBranch().getId()).stream()
+        Long branchId = manager.getBranch().getId();
+        List<Shift> openShifts = shiftRepository.findByBranchId(branchId).stream()
             .filter(shift -> !shift.getShiftDate().isBefore(LocalDate.now()))
             .filter(shift -> shift.getAssignedStaff() < shift.getRequiredStaff())
             .sorted(Comparator.comparing(Shift::getShiftDate).thenComparing(Shift::getStartTime))
             .toList();
 
+        List<User> branchEmployees = userRepository.findByRole(Role.EMPLOYEE).stream()
+            .filter(employee -> employee.getBranch() != null && employee.getBranch().getId().equals(branchId))
+            .filter(User::isActive)
+            .toList();
+
+        Map<Long, List<ShiftAssignment>> assignmentsByShiftId = new HashMap<>();
+        Map<Long, List<ShiftAssignment>> assignmentsByEmployeeId = new HashMap<>();
+        Map<Long, Integer> assignmentCounts = new HashMap<>();
+        for (ShiftAssignment assignment : shiftAssignmentRepository.findAll()) {
+            if (assignment.getShift() == null || assignment.getEmployee() == null || assignment.getShift().getBranch() == null) {
+                continue;
+            }
+            if (!branchId.equals(assignment.getShift().getBranch().getId())) {
+                continue;
+            }
+            assignmentsByShiftId.computeIfAbsent(assignment.getShift().getId(), key -> new ArrayList<>()).add(assignment);
+            assignmentsByEmployeeId.computeIfAbsent(assignment.getEmployee().getId(), key -> new ArrayList<>()).add(assignment);
+            assignmentCounts.merge(assignment.getEmployee().getId(), 1, Integer::sum);
+        }
+
+        Map<LocalDate, List<Availability>> availabilityByDate = availabilityRepository.findAll().stream()
+            .filter(item -> item.getEmployee() != null && item.getEmployee().getBranch() != null)
+            .filter(item -> branchId.equals(item.getEmployee().getBranch().getId()))
+            .collect(Collectors.groupingBy(Availability::getAvailableDate));
+
         for (Shift shift : openShifts) {
             while (shift.getAssignedStaff() < shift.getRequiredStaff()) {
-                String missingRole = findMissingRole(shiftAssignmentRepository.findByShiftId(shift.getId()));
-                User employee = findBestAvailableEmployee(manager, shift, missingRole).orElse(null);
+                List<ShiftAssignment> currentAssignments = assignmentsByShiftId.getOrDefault(shift.getId(), List.of());
+                String missingRole = findMissingRole(currentAssignments);
+                User employee = findBestAvailableEmployee(
+                    shift,
+                    missingRole,
+                    branchEmployees,
+                    assignmentsByShiftId,
+                    assignmentsByEmployeeId,
+                    assignmentCounts,
+                    availabilityByDate
+                ).orElse(null);
                 if (employee == null) {
                     break;
                 }
                 assignEmployeeToShift(manager, employee, shift, "Auto-scheduled available staff into open shift");
+                ShiftAssignment savedAssignment = shiftAssignmentRepository.findByEmployeeIdAndShiftId(employee.getId(), shift.getId()).orElse(null);
+                if (savedAssignment != null) {
+                    assignmentsByShiftId.computeIfAbsent(shift.getId(), key -> new ArrayList<>()).add(savedAssignment);
+                    assignmentsByEmployeeId.computeIfAbsent(employee.getId(), key -> new ArrayList<>()).add(savedAssignment);
+                }
+                assignmentCounts.merge(employee.getId(), 1, Integer::sum);
             }
             shiftRepository.save(shift);
         }
@@ -395,28 +438,70 @@ public class SchedulingService {
             .orElseThrow(() -> new IllegalArgumentException("No understaffed shifts are available"));
     }
 
-    private java.util.Optional<User> findBestAvailableEmployee(User manager, Shift shift, String requiredRole) {
-        List<User> branchEmployees = userRepository.findByRole(Role.EMPLOYEE).stream()
-            .filter(employee -> employee.getBranch() != null && employee.getBranch().getId().equals(manager.getBranch().getId()))
-            .filter(User::isActive)
+    private java.util.Optional<User> findBestAvailableEmployee(
+        Shift shift,
+        String requiredRole,
+        List<User> branchEmployees,
+        Map<Long, List<ShiftAssignment>> assignmentsByShiftId,
+        Map<Long, List<ShiftAssignment>> assignmentsByEmployeeId,
+        Map<Long, Integer> assignmentCounts,
+        Map<LocalDate, List<Availability>> availabilityByDate
+    ) {
+        List<User> eligibleEmployees = branchEmployees.stream()
             .filter(employee -> requiredRole == null || requiredRole.equals(resolveShiftRole(employee)))
+            .filter(employee -> !isEmployeeAssignedToShift(employee.getId(), shift.getId(), assignmentsByShiftId))
+            .filter(employee -> !hasSameDayAssignment(employee.getId(), shift.getShiftDate(), assignmentsByEmployeeId))
             .toList();
 
-        List<Availability> dayAvailability = availabilityRepository.findByAvailableDate(shift.getShiftDate());
-        java.util.Optional<User> explicitAvailabilityMatch = branchEmployees.stream()
-            .filter(employee -> !isEmployeeAssignedToShift(employee.getId(), shift.getId()))
-            .filter(employee -> !hasSameDayAssignment(employee.getId(), shift.getShiftDate()))
+        List<Availability> dayAvailability = availabilityByDate.getOrDefault(shift.getShiftDate(), List.of());
+        java.util.Optional<User> explicitAvailabilityMatch = eligibleEmployees.stream()
             .filter(employee -> isActuallyAvailable(employee.getId(), shift, dayAvailability))
-            .min(Comparator.comparingInt(employee -> shiftAssignmentRepository.findByEmployeeId(employee.getId()).size()));
+            .min(Comparator.comparingInt(employee -> assignmentCounts.getOrDefault(employee.getId(), 0)));
 
         if (explicitAvailabilityMatch.isPresent()) {
             return explicitAvailabilityMatch;
         }
 
-        return branchEmployees.stream()
-            .filter(employee -> !isEmployeeAssignedToShift(employee.getId(), shift.getId()))
-            .filter(employee -> !hasSameDayAssignment(employee.getId(), shift.getShiftDate()))
-            .min(Comparator.comparingInt(employee -> shiftAssignmentRepository.findByEmployeeId(employee.getId()).size()));
+        return eligibleEmployees.stream()
+            .min(Comparator.comparingInt(employee -> assignmentCounts.getOrDefault(employee.getId(), 0)));
+    }
+
+    private java.util.Optional<User> findBestAvailableEmployee(User manager, Shift shift, String requiredRole) {
+        Long branchId = manager.getBranch().getId();
+        List<User> branchEmployees = userRepository.findByRole(Role.EMPLOYEE).stream()
+            .filter(employee -> employee.getBranch() != null && employee.getBranch().getId().equals(branchId))
+            .filter(User::isActive)
+            .toList();
+
+        Map<Long, List<ShiftAssignment>> assignmentsByShiftId = new HashMap<>();
+        Map<Long, List<ShiftAssignment>> assignmentsByEmployeeId = new HashMap<>();
+        Map<Long, Integer> assignmentCounts = new HashMap<>();
+        for (ShiftAssignment assignment : shiftAssignmentRepository.findAll()) {
+            if (assignment.getShift() == null || assignment.getEmployee() == null || assignment.getShift().getBranch() == null) {
+                continue;
+            }
+            if (!branchId.equals(assignment.getShift().getBranch().getId())) {
+                continue;
+            }
+            assignmentsByShiftId.computeIfAbsent(assignment.getShift().getId(), key -> new ArrayList<>()).add(assignment);
+            assignmentsByEmployeeId.computeIfAbsent(assignment.getEmployee().getId(), key -> new ArrayList<>()).add(assignment);
+            assignmentCounts.merge(assignment.getEmployee().getId(), 1, Integer::sum);
+        }
+
+        Map<LocalDate, List<Availability>> availabilityByDate = availabilityRepository.findAll().stream()
+            .filter(item -> item.getEmployee() != null && item.getEmployee().getBranch() != null)
+            .filter(item -> branchId.equals(item.getEmployee().getBranch().getId()))
+            .collect(Collectors.groupingBy(Availability::getAvailableDate));
+
+        return findBestAvailableEmployee(
+            shift,
+            requiredRole,
+            branchEmployees,
+            assignmentsByShiftId,
+            assignmentsByEmployeeId,
+            assignmentCounts,
+            availabilityByDate
+        );
     }
 
     private boolean isEmployeeAssignedToShift(Long employeeId, Long shiftId) {
@@ -424,8 +509,19 @@ public class SchedulingService {
             .anyMatch(item -> item.getEmployee().getId().equals(employeeId));
     }
 
+    private boolean isEmployeeAssignedToShift(Long employeeId, Long shiftId, Map<Long, List<ShiftAssignment>> assignmentsByShiftId) {
+        return assignmentsByShiftId.getOrDefault(shiftId, List.of()).stream()
+            .anyMatch(item -> item.getEmployee().getId().equals(employeeId));
+    }
+
     private boolean hasSameDayAssignment(Long employeeId, LocalDate shiftDate) {
         return shiftAssignmentRepository.findByEmployeeId(employeeId).stream()
+            .map(ShiftAssignment::getShift)
+            .anyMatch(existingShift -> existingShift.getShiftDate().equals(shiftDate));
+    }
+
+    private boolean hasSameDayAssignment(Long employeeId, LocalDate shiftDate, Map<Long, List<ShiftAssignment>> assignmentsByEmployeeId) {
+        return assignmentsByEmployeeId.getOrDefault(employeeId, List.of()).stream()
             .map(ShiftAssignment::getShift)
             .anyMatch(existingShift -> existingShift.getShiftDate().equals(shiftDate));
     }
@@ -477,16 +573,16 @@ public class SchedulingService {
                 .build()
         );
 
-        sendShiftAssignmentEmail(employee, shift);
+        queueShiftAssignmentEmail(employee, shift);
         logAudit(manager, action, "Scheduling", employee.getFullName() + " assigned to " + shift.getName() + " on " + shift.getShiftDate() + ".");
     }
 
-    private void sendShiftAssignmentEmail(User employee, Shift shift) {
+    private void queueShiftAssignmentEmail(User employee, Shift shift) {
         if (employee == null || employee.getEmail() == null || employee.getEmail().isBlank()) {
             return;
         }
 
-        credentialEmailService.sendShiftChangeNotice(
+        Runnable task = () -> credentialEmailService.sendShiftChangeNotice(
             employee.getEmail(),
             employee.getFullName(),
             "New shift assignment - " + shift.getName(),
@@ -499,6 +595,18 @@ public class SchedulingService {
                     .build()
             )
         );
+
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    CompletableFuture.runAsync(task);
+                }
+            });
+            return;
+        }
+
+        CompletableFuture.runAsync(task);
     }
 
     private void validateAssignableShift(User employee, Shift shift) {

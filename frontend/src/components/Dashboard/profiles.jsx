@@ -54,10 +54,21 @@ const emptyCreateForm = {
 	fullName: '',
 	email: '',
 	jobTitle: '',
+	coreExpertise: [],
 	phoneNumber: '',
 }
 
 const EMPLOYEE_ROLE_OPTIONS = ['Pharmacist', 'Pharmacy Assistant / Attendant']
+const CORE_EXPERTISE_OPTIONS = [
+	'Prescription Review',
+	'Medication Dispensing',
+	'Patient Counseling',
+	'Inventory Control',
+	'Controlled Medicines',
+	'Vaccination Support',
+	'Stock Receiving',
+	'Insurance Claims',
+]
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const phonePattern = /^\+?[0-9]{10,15}$/
 
@@ -89,10 +100,12 @@ export default function Profiles() {
 	const detailRequestRef = useRef(0)
 	const [showCreateForm, setShowCreateForm] = useState(false)
 	const [createForm, setCreateForm] = useState(emptyCreateForm)
+	const [createFormErrors, setCreateFormErrors] = useState({})
 	const [isCreating, setIsCreating] = useState(false)
 	const [createResult, setCreateResult] = useState(null)
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 	const [currentPage, setCurrentPage] = useState(1)
+	const [showExpertiseMenu, setShowExpertiseMenu] = useState(false)
 
 	const roster = workspace.profiles.roster
 	const filteredRoster = roster.filter((employee) => {
@@ -215,6 +228,27 @@ export default function Profiles() {
 			...current,
 			[name]: value,
 		}))
+		setCreateFormErrors((current) => ({
+			...current,
+			[name]: '',
+		}))
+	}
+
+	function toggleCreateExpertise(expertise) {
+		setCreateForm((current) => {
+			const nextSelected = current.coreExpertise.includes(expertise)
+				? current.coreExpertise.filter((item) => item !== expertise)
+				: [...current.coreExpertise, expertise]
+
+			return {
+				...current,
+				coreExpertise: nextSelected,
+			}
+		})
+		setCreateFormErrors((current) => ({
+			...current,
+			coreExpertise: '',
+		}))
 	}
 
 	function validateEmployeePayload(payload) {
@@ -240,6 +274,38 @@ export default function Profiles() {
 			return 'Phone number must contain 10 to 15 digits.'
 		}
 		return ''
+	}
+
+	function validateCreateEmployeePayload(payload) {
+		const nextErrors = {}
+
+		if (!payload.fullName.trim()) {
+			nextErrors.fullName = 'Employee full name is required.'
+		} else if (payload.fullName.trim().length < 3) {
+			nextErrors.fullName = 'Employee full name must be at least 3 characters long.'
+		}
+
+		if (!payload.email.trim()) {
+			nextErrors.email = 'Employee email is required.'
+		} else if (!emailPattern.test(payload.email.trim())) {
+			nextErrors.email = 'Enter a valid email address.'
+		}
+
+		if (!payload.jobTitle.trim()) {
+			nextErrors.jobTitle = 'Employee role is required.'
+		} else if (!EMPLOYEE_ROLE_OPTIONS.includes(payload.jobTitle.trim())) {
+			nextErrors.jobTitle = 'Employee role must be either Pharmacist or Pharmacy Assistant / Attendant.'
+		}
+
+		if (!payload.coreExpertise.length) {
+			nextErrors.coreExpertise = 'Select at least one core expertise.'
+		}
+
+		if (payload.phoneNumber.trim() && !phonePattern.test(payload.phoneNumber.trim())) {
+			nextErrors.phoneNumber = 'Phone number must contain 10 to 15 digits.'
+		}
+
+		return nextErrors
 	}
 
 	function handleSelectEmployee(employeeId) {
@@ -323,9 +389,10 @@ export default function Profiles() {
 			return
 		}
 
-		const validationMessage = validateEmployeePayload(createForm)
-		if (validationMessage) {
-			setActionError(validationMessage)
+		const validationErrors = validateCreateEmployeePayload(createForm)
+		if (Object.keys(validationErrors).length) {
+			setCreateFormErrors(validationErrors)
+			setActionError('Fix the highlighted fields before creating the employee.')
 			setActionMessage('')
 			return
 		}
@@ -334,17 +401,20 @@ export default function Profiles() {
 			setIsCreating(true)
 			setActionError('')
 			setActionMessage('')
+			setCreateFormErrors({})
 			setCreateResult(null)
-		const createdEmployee = await createManagedEmployee({
-			managerId: session.userId,
-			fullName: createForm.fullName.trim(),
-			email: createForm.email.trim(),
+			const createdEmployee = await createManagedEmployee({
+				managerId: session.userId,
+				fullName: createForm.fullName.trim(),
+				email: createForm.email.trim(),
 				jobTitle: createForm.jobTitle.trim(),
+				coreExpertise: createForm.coreExpertise,
 				phoneNumber: createForm.phoneNumber.trim(),
 			})
 			await reloadWorkspace()
 			setSelectedEmployeeId(createdEmployee.userId)
 			setCreateForm(emptyCreateForm)
+			setShowExpertiseMenu(false)
 			setCreateResult(createdEmployee)
 			setActionMessage(
 				createdEmployee.emailDelivered
@@ -522,7 +592,15 @@ export default function Profiles() {
 									<button
 										className="rounded-xl bg-[#0f51ff] px-4 py-2 text-sm font-bold text-white"
 										onClick={() => {
-											setShowCreateForm((current) => !current)
+											setShowCreateForm((current) => {
+												const next = !current
+												if (next) {
+													setCreateForm(emptyCreateForm)
+													setCreateFormErrors({})
+													setShowExpertiseMenu(false)
+												}
+												return next
+											})
 											setActionError('')
 											setCreateResult(null)
 										}}
@@ -601,10 +679,12 @@ export default function Profiles() {
 										<label className="space-y-2">
 											<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Full Name</div>
 											<input className="w-full rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#0f51ff]" name="fullName" onChange={handleCreateFieldChange} value={createForm.fullName} />
+											{createFormErrors.fullName ? <div className="text-xs font-semibold text-rose-600">{createFormErrors.fullName}</div> : null}
 										</label>
 										<label className="space-y-2">
 											<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Email</div>
 											<input className="w-full rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#0f51ff]" name="email" onChange={handleCreateFieldChange} value={createForm.email} />
+											{createFormErrors.email ? <div className="text-xs font-semibold text-rose-600">{createFormErrors.email}</div> : null}
 										</label>
 										<label className="space-y-2">
 											<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Job Title</div>
@@ -614,11 +694,62 @@ export default function Profiles() {
 													<option key={role} value={role}>{role}</option>
 												))}
 											</select>
+											{createFormErrors.jobTitle ? <div className="text-xs font-semibold text-rose-600">{createFormErrors.jobTitle}</div> : null}
 										</label>
 										<label className="space-y-2">
 											<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Phone Number</div>
 											<input className="w-full rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#0f51ff]" name="phoneNumber" onChange={handleCreateFieldChange} value={createForm.phoneNumber} />
+											{createFormErrors.phoneNumber ? <div className="text-xs font-semibold text-rose-600">{createFormErrors.phoneNumber}</div> : null}
 										</label>
+										<div className="space-y-2 md:col-span-2">
+											<div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">Core Expertise</div>
+											<div className="relative">
+												<button
+													className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-[#f8faff] px-4 py-3 text-left text-sm text-slate-900 outline-none focus:border-[#0f51ff]"
+													onClick={() => setShowExpertiseMenu((current) => !current)}
+													type="button"
+												>
+													<span>{createForm.coreExpertise.length ? `${createForm.coreExpertise.length} selected` : 'Choose core expertise'}</span>
+													<FiChevronDown className="h-4 w-4 text-slate-500" />
+												</button>
+												{showExpertiseMenu ? (
+													<div className="absolute z-20 mt-2 w-full rounded-2xl border border-slate-200 bg-white p-3">
+														<div className="grid gap-2 sm:grid-cols-2">
+															{CORE_EXPERTISE_OPTIONS.map((expertise) => {
+																const checked = createForm.coreExpertise.includes(expertise)
+																return (
+																	<button
+																		key={expertise}
+																		className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-semibold transition ${checked ? 'border-[#0f51ff] bg-[#eef3ff] text-slate-900' : 'border-slate-200 bg-white text-slate-700'}`}
+																		onClick={() => toggleCreateExpertise(expertise)}
+																		type="button"
+																	>
+																		<span>{expertise}</span>
+																		<span className={`flex h-5 w-5 items-center justify-center rounded-full border ${checked ? 'border-[#0f51ff] bg-[#0f51ff] text-white' : 'border-slate-300 text-transparent'}`}>
+																			<FiCheck className="h-3 w-3" />
+																		</span>
+																	</button>
+																)
+															})}
+														</div>
+													</div>
+												) : null}
+											</div>
+											<div className="flex flex-wrap gap-2">
+												{createForm.coreExpertise.length ? createForm.coreExpertise.map((item) => (
+													<button
+														key={item}
+														className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+														onClick={() => toggleCreateExpertise(item)}
+														type="button"
+													>
+														{item}
+														<span className="text-slate-400">×</span>
+													</button>
+												)) : <div className="text-xs font-medium text-slate-500">Select one or more expertise areas for this employee.</div>}
+											</div>
+											{createFormErrors.coreExpertise ? <div className="text-xs font-semibold text-rose-600">{createFormErrors.coreExpertise}</div> : null}
+										</div>
 									</div>
 
 									<div className="mt-5 flex items-center gap-3">
@@ -627,6 +758,8 @@ export default function Profiles() {
 											onClick={() => {
 												setShowCreateForm(false)
 												setCreateForm(emptyCreateForm)
+												setCreateFormErrors({})
+												setShowExpertiseMenu(false)
 												setCreateResult(null)
 											}}
 											type="button"
@@ -639,7 +772,8 @@ export default function Profiles() {
 												isCreating ||
 												!createForm.fullName.trim() ||
 												!createForm.email.trim() ||
-												!createForm.jobTitle.trim()
+												!createForm.jobTitle.trim() ||
+												!createForm.coreExpertise.length
 											}
 											onClick={handleCreateEmployee}
 											type="button"

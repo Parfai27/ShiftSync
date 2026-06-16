@@ -352,40 +352,37 @@ export default function EmployeeNotifications() {
 									const contextLabel = resolveNotificationContext(item)
 
 									return (
-										<article key={item.id} className={`relative overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_16px_36px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_48px_rgba(15,23,42,0.08)] ${style.tone} border-l-4`}>
+										<article key={item.id} className={`relative overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-none transition hover:border-slate-300 ${style.tone} border-l-4`}>
 											<div className={`absolute left-0 top-0 h-full w-1.5 ${item.unread ? 'bg-[#1f56ea]' : 'bg-slate-200'}`} />
-											<div className="px-5 py-5 sm:px-6">
-												<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-													<div className="flex items-start gap-4">
+											<div className="px-3 py-3 sm:px-4 sm:py-3">
+												<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+													<div className="flex items-start gap-3">
 														<button
-															className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/80 ${style.iconTone} shadow-sm`}
+															className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/80 ${style.iconTone}`}
 															onClick={() => openNotificationDetails(item)}
 															type="button"
 														>
-															<Icon className="h-5 w-5" />
+															<Icon className="h-3.5 w-3.5" />
 														</button>
 
 														<div className="min-w-0">
-															<div className="flex flex-wrap items-center gap-2">
-																<span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] ${item.unread ? 'bg-[#eef3ff] text-[#1f56ea]' : 'bg-slate-100 text-slate-500'}`}>
+															<div className="flex flex-wrap items-center gap-1.5">
+																<span className={`inline-flex rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[0.16em] ${item.unread ? 'bg-[#eef3ff] text-[#1f56ea]' : 'bg-slate-100 text-slate-500'}`}>
 																	{kindLabel}
 																</span>
-																<span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] ${item.unread ? 'bg-[#fff1f1] text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+																<span className={`inline-flex rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[0.16em] ${item.unread ? 'bg-[#fff1f1] text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
 																	{item.unread ? 'Unread' : 'Read'}
 																</span>
-																<span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-500">
-																	{contextLabel}
-																</span>
 															</div>
-															<button className="mt-3 block text-left" onClick={() => openNotificationRoute(item)} type="button">
-																<h2 className="text-[19px] font-black tracking-[-0.04em] text-slate-950 sm:text-[21px]">
+															<button className="mt-1 block text-left" onClick={() => openNotificationRoute(item)} type="button">
+																<h2 className="text-[14px] font-black tracking-[-0.03em] text-slate-950 sm:text-[15px]">
 																	{item.title}
 																</h2>
 															</button>
 															<button
-																className="mt-2 block max-w-4xl text-left text-sm leading-6 text-slate-600 sm:text-[15px]"
+																className="mt-1 block max-w-xl text-left text-[11px] leading-5 text-slate-500 sm:text-[12px]"
 																onClick={() => openNotificationRoute(item)}
-																style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3, overflow: 'hidden' }}
+																style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}
 																type="button"
 															>
 																{item.detail}
@@ -393,26 +390,26 @@ export default function EmployeeNotifications() {
 														</div>
 													</div>
 
-													<div className="flex shrink-0 items-center gap-2 rounded-full bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-														<FiClock className="h-3.5 w-3.5" />
+													<div className="flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+														<FiClock className="h-2.5 w-2.5" />
 														{item.when}
 													</div>
 												</div>
 
-												<div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-													<div className="flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
-														<span>{item.kind === 'schedule' ? 'Related to your rota' : item.kind === 'pay' ? 'Payroll update' : 'System update'}</span>
+												<div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+													<div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
+														{contextLabel}
 													</div>
-													<div className="flex flex-wrap items-center gap-2">
+													<div className="flex flex-wrap items-center gap-1.5">
 														<button
-															className="rounded-full bg-[#eef3ff] px-4 py-2 text-sm font-bold text-[#1f56ea] transition hover:bg-[#e1e9ff]"
+															className="rounded-full bg-[#eef3ff] px-2.5 py-1 text-[11px] font-bold text-[#1f56ea] transition hover:bg-[#e1e9ff]"
 															onClick={() => openNotificationDetails(item)}
 															type="button"
 														>
 															View details
 														</button>
 														<button
-															className="rounded-full px-4 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-100"
+															className="rounded-full px-2.5 py-1 text-[11px] font-bold text-slate-600 transition hover:bg-slate-100"
 															onClick={() => updateNotification(item.id, !item.unread)}
 															type="button"
 														>
@@ -484,7 +481,7 @@ export default function EmployeeNotifications() {
 							</div>
 							<button className="rounded-full bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" onClick={() => setSelectedNotification(null)} type="button">Close</button>
 						</div>
-						<p className="mt-5 rounded-2xl bg-[#f8faff] p-5 text-sm leading-7 text-slate-700">{selectedNotification.detail}</p>
+						<p className="mt-5 rounded-2xl bg-[#f8faff] p-4 text-[13px] leading-6 text-slate-600">{selectedNotification.detail}</p>
 						<div className="mt-5 flex flex-wrap justify-end gap-3">
 							{resolveNotificationPath(selectedNotification) ? (
 								<button className="rounded-full bg-[#eef2ff] px-4 py-2 text-sm font-bold text-[#0f51ff]" onClick={() => openNotificationRoute(selectedNotification)} type="button">

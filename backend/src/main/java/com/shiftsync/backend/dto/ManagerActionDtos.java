@@ -4,7 +4,9 @@ import com.shiftsync.backend.model.AdjustmentStatus;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotEmpty;
 import java.time.LocalDate;
+import java.util.List;
 
 public final class ManagerActionDtos {
 
@@ -70,6 +72,8 @@ public final class ManagerActionDtos {
         String email,
         @NotBlank(message = "Employee job title is required.")
         String jobTitle,
+        @NotEmpty(message = "Select at least one core expertise.")
+        List<String> coreExpertise,
         String phoneNumber,
         LocalDate hireDate
     ) {
